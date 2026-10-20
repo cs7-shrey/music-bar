@@ -29,6 +29,12 @@ function createTray(): void {
 }
 
 app.whenReady().then(() => {
+    // Replaces Electron's default menu, whose Hide item owns ⌘H before the
+    // launcher sees it (⌘H is "previous"). The Edit menu keeps copy/paste
+    // working in the search box.
+    Menu.setApplicationMenu(
+        Menu.buildFromTemplate([{ label: app.name, submenu: [{ role: 'quit' }] }, { role: 'editMenu' }]),
+    )
     // Covers `pnpm dev`, where LSUIElement from forge.config.ts does not apply.
     app.dock?.hide()
     // Always dark for now: drives both the vibrancy material and the

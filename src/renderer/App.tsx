@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
 import { Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
-import type { SearchSong } from '../shared/ipc'
+import type { PlayerControl, SearchSong } from '../shared/ipc'
 import { NowPlaying, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
@@ -18,10 +18,11 @@ const LOOP_COMMAND = 'Loop Current Song'
 // Placeholders until each command is wired to YouTube Music.
 const SOON_COMMANDS: PlaybackCommand[] = [
     { id: 'start-radio', title: 'Start Radio', subtitle: 'Start a radio from another song', icon: <Radio /> },
-    { id: 'play-now', title: 'Play Now', subtitle: 'Replace the current song', icon: <Play /> },
 ]
 
 const NOTICE_MS = 2500
+
+const SHORTCUTS: Record<string, 'loop' | PlayerControl> = { o: 'loop', h: 'previous', l: 'next' }
 
 const matches = (query: string, ...texts: string[]) =>
     texts.some((text) => text.toLowerCase().includes(query.toLowerCase()))
@@ -108,10 +109,13 @@ export default function App() {
             void queueNext(selectedSong)
             return
         }
-        // ⌘O toggles the loop from anywhere, even mid-search.
-        if (event.metaKey && event.key.toLowerCase() === 'o') {
+        // Player shortcuts work from anywhere, even mid-search: ⌘O loop,
+        // ⌘H previous, ⌘L next.
+        const shortcut = event.metaKey && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]
+        if (shortcut) {
             event.preventDefault()
-            nowPlaying.toggleLoop()
+            if (shortcut === 'loop') nowPlaying.toggleLoop()
+            else nowPlaying.control(shortcut)
             return
         }
         if (event.key !== 'Escape') return
@@ -288,8 +292,9 @@ function CommandRow({
             <span className="flex size-7 items-center justify-center rounded-md bg-red-500/90 text-white [&>svg]:size-4">
                 {icon}
             </span>
-            <span className="font-medium">{title}</span>
-            <span className="truncate text-neutral-400">{subtitle}</span>
+            {/* The title keeps its width; a long subtitle truncates instead. */}
+            <span className="shrink-0 whitespace-nowrap font-medium">{title}</span>
+            <span className="min-w-0 truncate text-neutral-400">{subtitle}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
                 {badge && (
                     <span className="rounded px-1.5 py-0.5 text-[11px] text-neutral-400 ring-1 ring-white/15">

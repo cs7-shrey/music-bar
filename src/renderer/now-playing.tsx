@@ -181,13 +181,13 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop }: ReturnTyp
             </div>
             <div className="flex items-center gap-1">
                 <ControlButton
-                    label={track.repeatMode === 'ONE' ? 'Stop looping' : 'Loop this song'}
+                    label={track.repeatMode === 'ONE' ? 'Stop looping (⌘O)' : 'Loop this song (⌘O)'}
                     onClick={toggleLoop}
                     active={track.repeatMode === 'ONE'}
                 >
                     <Repeat1 className="size-[18px]" />
                 </ControlButton>
-                <ControlButton label="Previous" onClick={() => void control('previous')}>
+                <ControlButton label="Previous (⌘H)" onClick={() => void control('previous')}>
                     <SkipBack className="size-[18px]" fill="currentColor" />
                 </ControlButton>
                 <ControlButton label={track.isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} large>
@@ -197,7 +197,7 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop }: ReturnTyp
                         <Play className="size-6" fill="currentColor" strokeWidth={0} />
                     )}
                 </ControlButton>
-                <ControlButton label="Next" onClick={() => void control('next')}>
+                <ControlButton label="Next (⌘L)" onClick={() => void control('next')}>
                     <SkipForward className="size-[18px]" fill="currentColor" />
                 </ControlButton>
             </div>
