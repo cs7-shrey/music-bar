@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "composite": true,
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "target": "ESNext",
+        "lib": ["ESNext", "DOM"],
+        "strict": true,
+        "skipLibCheck": true,
+        "types": ["node"]
+    },
+    "include": [
+        "forge.config.ts",
+        "vite.*.config.*",
+        "src/main/**/*",
+        "src/preload/**/*",
+        "src/shared/**/*"
+    ]
+}

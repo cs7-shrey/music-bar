@@ -1,0 +1,36 @@
+{
+    "name": "music-bar",
+    "productName": "Music Bar",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Raycast-style launcher for controlling YouTube Music in Chromium browsers",
+    "main": ".vite/build/main.js",
+    "scripts": {
+        "dev": "electron-forge start",
+        "build": "electron-forge package",
+        "make": "electron-forge make",
+        "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    },
+    "dependencies": {
+        "clsx": "^2.1.1",
+        "cmdk": "^1.1.1",
+        "lucide-react": "^0.541.0",
+        "react": "^19.1.1",
+        "react-dom": "^19.1.1"
+    },
+    "devDependencies": {
+        "@electron-forge/cli": "^7.11.1",
+        "@electron-forge/maker-zip": "^7.11.1",
+        "@electron-forge/plugin-vite": "^7.11.1",
+        "@electron-forge/shared-types": "^7.11.1",
+        "@tailwindcss/vite": "^4.1.12",
+        "@types/node": "^25.0.7",
+        "@types/react": "^19.1.11",
+        "@types/react-dom": "^19.1.7",
+        "@vitejs/plugin-react": "^5.2.0",
+        "electron": "44.4.3",
+        "tailwindcss": "^4.1.12",
+        "typescript": "^5.9.2",
+        "vite": "^8.0.3"
+    }
+}

@@ -1,0 +1,8 @@
+node_modules
+out
+.vite
+.env
+.DS_Store
+*.tsbuildinfo
+native/**/.build/
+resources/bin/
