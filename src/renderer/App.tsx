@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
 import { ListMusic, Music2, Play, Radio, Repeat1, Search } from 'lucide-react'
+import type { SearchSong } from '../shared/ipc'
 import { NowPlaying, useNowPlaying } from './now-playing'
+import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
 interface PlaybackCommand {
     id: string
@@ -19,94 +21,185 @@ const SOON_COMMANDS: PlaybackCommand[] = [
     { id: 'play-now', title: 'Play Now', subtitle: 'Replace the current song', icon: <Play /> },
 ]
 
+const matches = (query: string, ...texts: string[]) =>
+    texts.some((text) => text.toLowerCase().includes(query.toLowerCase()))
+
 export default function App() {
     const [query, setQuery] = useState('')
+    // The query whose full search is on screen; null while typing.
+    const [submitted, setSubmitted] = useState<string | null>(null)
     const [selected, setSelected] = useState(LOOP_COMMAND)
     const inputRef = useRef<HTMLInputElement>(null)
     const nowPlaying = useNowPlaying()
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
     const isLooping = track?.repeatMode === 'ONE'
 
+    const trimmed = query.trim()
+    const live = useSuggestions(submitted === null ? query : '')
+    const full = useFullSearch(submitted ?? '')
+
+    const reset = () => {
+        setQuery('')
+        setSubmitted(null)
+        setSelected(LOOP_COMMAND)
+    }
+
     useEffect(
         () =>
             window.musicBar.onShown(() => {
-                setQuery('')
-                setSelected(LOOP_COMMAND)
+                reset()
                 inputRef.current?.focus()
             }),
         [],
     )
 
+    // Land on the first song once a full search comes back.
+    const firstResult = full.results?.status === 'ok' ? full.results.songs[0] : undefined
+    useEffect(() => {
+        if (firstResult) setSelected(songValue(firstResult))
+    }, [firstResult])
+
+    const changeQuery = (next: string) => {
+        setQuery(next)
+        setSubmitted(null)
+        setSelected(next.trim() ? searchValue(next.trim()) : LOOP_COMMAND)
+    }
+
+    const submit = (searchQuery: string) => {
+        setQuery(searchQuery)
+        setSubmitted(searchQuery)
+    }
+
+    const play = (song: SearchSong) => {
+        void nowPlaying.playNow(song)
+        // Back to the now-playing card, which picks up the new song.
+        reset()
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key !== 'Escape') return
         event.preventDefault()
-        if (query) setQuery('')
+        if (submitted !== null) {
+            setSubmitted(null)
+            setSelected(searchValue(trimmed))
+        } else if (query) reset()
         else window.musicBar.hide()
     }
+
+    const showLoop = !trimmed || matches(trimmed, LOOP_COMMAND, 'repeat', 'stop looping')
+    const soonCommands = SOON_COMMANDS.filter(
+        (command) => !trimmed || matches(trimmed, command.title, command.subtitle),
+    )
+    const commands = (showLoop || soonCommands.length > 0) && (
+        <Command.Group heading="Playback">
+            {showLoop && (
+                <CommandRow
+                    // Stable value so the selection does not jump when the title flips.
+                    value={LOOP_COMMAND}
+                    icon={<Repeat1 />}
+                    title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
+                    subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
+                    badge={isLooping ? 'On' : undefined}
+                    // Dimmed rather than skipped: a missing first row would push
+                    // the selection onto a placeholder while the track loads.
+                    muted={!track}
+                    onSelect={() => track && void nowPlaying.setLoop(!isLooping)}
+                />
+            )}
+            {soonCommands.map((command) => (
+                <CommandRow
+                    key={command.id}
+                    value={command.title}
+                    icon={command.icon}
+                    title={command.title}
+                    subtitle={command.subtitle}
+                    badge="Soon"
+                />
+            ))}
+        </Command.Group>
+    )
+
+    const liveResults = live.results?.status === 'ok' ? live.results : null
+    const suggestions = (liveResults?.suggestions ?? []).filter((text) => text.toLowerCase() !== trimmed.toLowerCase())
 
     return (
         <Command
             label="Music Bar"
             loop
+            // Results come from YouTube Music, so the list shows them as-is
+            // instead of letting cmdk fuzzy-filter them against the input.
+            shouldFilter={false}
             value={selected}
             onValueChange={setSelected}
             onKeyDown={handleKeyDown}
             className="flex h-full flex-col bg-[#161618]/85 text-neutral-100"
         >
-            <div className="flex h-14 shrink-0 items-center gap-3 border-b border-black/10 px-4 dark:border-white/10">
-                <Search className="size-[18px] text-neutral-500 dark:text-neutral-400" />
+            <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
+                <Search className="size-[18px] text-neutral-400" />
                 <Command.Input
                     ref={inputRef}
                     autoFocus
                     value={query}
-                    onValueChange={setQuery}
+                    onValueChange={changeQuery}
                     placeholder="Search YouTube Music or run a command…"
-                    className="h-full flex-1 bg-transparent text-[17px] outline-none placeholder:text-neutral-500 dark:placeholder:text-neutral-400"
+                    className="h-full flex-1 bg-transparent text-[17px] outline-none placeholder:text-neutral-400"
                 />
+                {(live.loading || full.loading) && (
+                    <span className="size-4 animate-spin rounded-full border-2 border-white/15 border-t-white/60" />
+                )}
             </div>
 
-            <NowPlaying {...nowPlaying} />
+            {!trimmed && <NowPlaying {...nowPlaying} />}
 
-            <Command.List className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                <Command.Empty className="py-10 text-center text-sm text-neutral-500 dark:text-neutral-400">
-                    No results
-                </Command.Empty>
-                <Command.Group heading="Playback">
-                    <CommandRow
-                        // Stable value so the selection does not jump when the title flips.
-                        value={LOOP_COMMAND}
-                        keywords={['repeat', 'stop looping']}
-                        icon={<Repeat1 />}
-                        title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
-                        subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
-                        badge={isLooping ? 'On' : undefined}
-                        // Dimmed rather than cmdk-disabled: a disabled first row would
-                        // push the selection onto a placeholder while the track loads.
-                        muted={!track}
-                        onSelect={() => track && void nowPlaying.setLoop(!isLooping)}
-                    />
-                    {SOON_COMMANDS.map((command) => (
-                        <CommandRow
-                            key={command.id}
-                            value={command.title}
-                            keywords={[command.subtitle]}
-                            icon={command.icon}
-                            title={command.title}
-                            subtitle={command.subtitle}
-                            badge="Soon"
-                        />
-                    ))}
-                </Command.Group>
+            <Command.List className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-2">
+                {!trimmed && commands}
+
+                {trimmed && submitted === null && (
+                    <>
+                        <Command.Group heading="Search">
+                            <SearchRow query={trimmed} label={`Search “${trimmed}”`} onSelect={() => submit(trimmed)} />
+                            {suggestions.map((text) => (
+                                <SearchRow key={text} query={text} label={text} onSelect={() => submit(text)} />
+                            ))}
+                        </Command.Group>
+                        {live.results?.status === 'error' && <ListNote>{live.results.message}</ListNote>}
+                        {liveResults && liveResults.songs.length > 0 && (
+                            <Command.Group heading="Songs">
+                                {liveResults.songs.map((song) => (
+                                    <SongRow key={song.videoId} song={song} onSelect={() => play(song)} />
+                                ))}
+                            </Command.Group>
+                        )}
+                        {commands}
+                    </>
+                )}
+
+                {submitted !== null && (
+                    <Command.Group heading={`Songs for “${submitted}”`}>
+                        {full.results === null && <ListNote>Searching…</ListNote>}
+                        {full.results?.status === 'error' && <ListNote>{full.results.message}</ListNote>}
+                        {full.results?.status === 'ok' && full.results.songs.length === 0 && (
+                            <ListNote>No songs found</ListNote>
+                        )}
+                        {full.results?.status === 'ok' &&
+                            full.results.songs.map((song) => (
+                                <SongRow key={song.videoId} song={song} onSelect={() => play(song)} />
+                            ))}
+                    </Command.Group>
+                )}
             </Command.List>
 
-            <footer className="flex h-10 shrink-0 items-center justify-between border-t border-black/10 bg-black/[0.03] px-4 text-xs text-neutral-500 dark:border-white/10 dark:bg-white/[0.03] dark:text-neutral-400">
+            <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.03] px-4 text-xs text-neutral-400">
                 <span className="flex items-center gap-1.5">
                     <Music2 className="size-3.5" />
                     Music Bar
                 </span>
                 <span className="flex items-center gap-3">
-                    <Hint keys="↵" label="Select" />
-                    <Hint keys="esc" label="Close" />
+                    <Hint
+                        keys="↵"
+                        label={selected.startsWith('song:') ? 'Play Now' : selected.startsWith('search:') ? 'Search' : 'Select'}
+                    />
+                    <Hint keys="esc" label={submitted !== null ? 'Back' : query ? 'Clear' : 'Close'} />
                 </span>
             </footer>
         </Command>
@@ -115,7 +208,6 @@ export default function App() {
 
 function CommandRow({
     value,
-    keywords,
     icon,
     title,
     subtitle,
@@ -124,7 +216,6 @@ function CommandRow({
     onSelect,
 }: {
     value: string
-    keywords: string[]
     icon: ReactNode
     title: string
     subtitle: string
@@ -135,7 +226,6 @@ function CommandRow({
     return (
         <Command.Item
             value={value}
-            keywords={keywords}
             onSelect={onSelect}
             className={`flex h-11 items-center gap-3 rounded-lg px-2 text-sm data-[selected=true]:bg-white/10 ${muted ? 'opacity-50' : ''}`}
         >
@@ -157,7 +247,7 @@ function Hint({ keys, label }: { keys: string; label: string }) {
     return (
         <span className="flex items-center gap-1.5">
             {label}
-            <kbd className="rounded bg-black/[0.06] px-1.5 py-0.5 font-sans text-[11px] dark:bg-white/10">{keys}</kbd>
+            <kbd className="rounded bg-white/10 px-1.5 py-0.5 font-sans text-[11px]">{keys}</kbd>
         </span>
     )
 }

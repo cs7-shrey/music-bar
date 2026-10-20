@@ -31,6 +31,14 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   (works on background tabs). Requires View → Developer → Allow JavaScript
   from Apple Events in each browser. No accessibility tree: Chromium only
   exposes the front tab's page to it.
+  Scripts run in the browser's isolated world: DOM and cookies are shared
+  with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`
+  cannot await; use `evaluateAsyncInTab` for anything async.
+- `src/main/youtube-music-search.ts` — search via YouTube Music's internal
+  InnerTube API (`music/get_search_suggestions`, `search`), called from inside
+  a YT Music tab so requests carry the user's session. Songs and videos are
+  told apart from albums/playlists/profiles by `videoId` and
+  `musicVideoType`, never by the localized "Song"/"Album" labels.
 - `src/preload/` — exposes `window.musicBar` via `contextBridge`.
 - `src/shared/` — IPC channel names and the `MusicBarApi` type, shared by all
   processes. Add every new IPC channel here.

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Music2, Pause, Play, Repeat1, SkipBack, SkipForward } from 'lucide-react'
-import type { NowPlaying as NowPlayingState, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type { NowPlaying as NowPlayingState, PlayerControl, SearchSong, Track } from '../shared/ipc'
 
 const POLL_MS = 2000
 // YouTube Music needs a moment to swap mediaSession metadata after a control.
 const SETTLE_MS = 400
+// Loading a new song takes longer than pressing a player button.
+const PLAY_SETTLE_MS = 1200
 
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
@@ -52,37 +54,60 @@ export function useNowPlaying() {
     }, [read])
 
     /** Applies an optimistic update, runs the action, then re-reads the real state. */
-    const act = async (optimistic: (track: Track) => Track, run: (source: TrackSource) => Promise<void>) => {
-        if (state?.status !== 'track') return
+    const act = async (optimistic: (track: Track) => Track, run: () => Promise<void>, settleMs = SETTLE_MS) => {
         actionSeq.current++
         actionsInFlight.current++
-        setState({ ...state, track: optimistic(state.track) })
+        setState((current) =>
+            current?.status === 'track' ? { ...current, track: optimistic(current.track) } : current,
+        )
         try {
-            await run(state.track.source)
+            await run()
+        } catch (error) {
+            console.error('[music-bar] action failed', error)
         } finally {
             actionsInFlight.current--
         }
         setTimeout(async () => {
             const next = await read()
             if (next) setState(next)
-        }, SETTLE_MS)
+        }, settleMs)
     }
 
-    const control = (action: PlayerControl) =>
-        act(
-            (track) => (action === 'play-pause' ? { ...track, isPlaying: !track.isPlaying } : track),
-            (source) => window.musicBar.control(source, action),
+    const track = state?.status === 'track' ? state.track : null
+
+    const control = async (action: PlayerControl) => {
+        if (!track) return
+        await act(
+            (current) => (action === 'play-pause' ? { ...current, isPlaying: !current.isPlaying } : current),
+            () => window.musicBar.control(track.source, action),
         )
+    }
 
     // Turning the loop off restores the previous mode, which only the page
     // knows; 'NONE' is a placeholder until the re-read lands.
-    const setLoop = (enabled: boolean) =>
+    const setLoop = async (enabled: boolean) => {
+        if (!track) return
+        await act(
+            (current) => ({ ...current, repeatMode: enabled ? 'ONE' : 'NONE' }),
+            () => window.musicBar.setLoop(track.source, enabled),
+        )
+    }
+
+    const playNow = (song: SearchSong) =>
         act(
-            (track) => ({ ...track, repeatMode: enabled ? 'ONE' : 'NONE' }),
-            (source) => window.musicBar.setLoop(source, enabled),
+            (current) => ({
+                ...current,
+                title: song.title,
+                artist: song.artist,
+                album: '',
+                artworkUrl: song.thumbnailUrl,
+                isPlaying: true,
+            }),
+            () => window.musicBar.playNow(song),
+            PLAY_SETTLE_MS,
         )
 
-    return { state, control, setLoop }
+    return { state, control, setLoop, playNow }
 }
 
 export function NowPlaying({ state, control, setLoop }: ReturnType<typeof useNowPlaying>) {

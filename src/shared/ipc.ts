@@ -11,6 +11,12 @@ export const IPC = {
     nowPlayingControl: 'now-playing:control',
     /** renderer → main (invoke): turn repeat-one on or off on a track's tab. */
     nowPlayingSetLoop: 'now-playing:set-loop',
+    /** renderer → main (invoke): live suggestions and songs while typing. */
+    searchSuggest: 'search:suggest',
+    /** renderer → main (invoke): the full search, as on /search?q=. */
+    searchRun: 'search:run',
+    /** renderer → main (invoke): play a song now in the followed tab. */
+    playNow: 'player:play-now',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -40,6 +46,18 @@ export type NowPlaying =
     | { status: 'none' }
     | { status: 'error'; message: string }
 
+export interface SearchSong {
+    videoId: string
+    title: string
+    artist: string
+    kind: 'song' | 'video'
+    thumbnailUrl: string | null
+}
+
+export type SearchResults =
+    | { status: 'ok'; suggestions: string[]; songs: SearchSong[] }
+    | { status: 'error'; message: string }
+
 export type PlayerControl = 'previous' | 'play-pause' | 'next'
 
 export interface MusicBarApi {
@@ -50,4 +68,7 @@ export interface MusicBarApi {
     control(source: TrackSource, control: PlayerControl): Promise<void>
     /** Off restores the repeat mode that was on before looping started. */
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
+    suggest(query: string): Promise<SearchResults>
+    search(query: string): Promise<SearchResults>
+    playNow(song: SearchSong): Promise<void>
 }
