@@ -13,7 +13,21 @@ import type { BrowserName, NowPlaying, PlayerControl, Track, TrackSource } from 
 const BROWSERS: BrowserName[] = ['Brave Browser', 'Google Chrome', 'Helium']
 const YT_MUSIC_URL = 'https://music.youtube.com/'
 
+// Chromium won't load media in a tab that has never been shown, such as one
+// restored at launch: a play request leaves the video unpaused with nothing
+// loaded (readyState 0) until the tab is opened once. Having seen media at
+// any point means the tab was shown, so the flag keeps an ordinary track
+// change (readyState briefly 0) from counting as asleep.
+const IS_ASLEEP_JS = `((video) => {
+    if (video && video.readyState > 0) window.__musicBarSawMedia = true;
+    return !!video && video.readyState === 0 && document.visibilityState === 'hidden' && !window.__musicBarSawMedia;
+})(document.querySelector('video'))`
+
 // Returns '' when the tab has no track loaded, else the track as JSON.
+// isPlaying needs more than "not paused": a restored background tab can be
+// told to play while Chromium holds off loading media until it is opened,
+// leaving the video unpaused with no data (readyState 0). readyState 2 means
+// data for the current position, which buffering stalls keep.
 const READ_TRACK_JS = `(() => {
     const m = navigator.mediaSession.metadata;
     if (!m || !m.title) return '';
@@ -24,8 +38,9 @@ const READ_TRACK_JS = `(() => {
         artist: m.artist,
         album: m.album,
         artworkUrl: art ? art.src : null,
-        isPlaying: !!video && !video.paused,
+        isPlaying: !!video && !video.paused && !video.ended && video.readyState >= 2,
         repeatMode: document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode') || 'NONE',
+        isAsleep: ${IS_ASLEEP_JS},
     });
 })()`
 
@@ -89,7 +104,7 @@ if application ${asString(browser)} is running then
             repeat with t in tabs of w
                 if URL of t starts with ${asString(YT_MUSIC_URL)} then
                     try
-                        set r to execute t javascript ${asString(READ_TRACK_JS.replace(/\s*\n\s*/g, ' '))}
+                        set r to execute t javascript ${asString(READ_TRACK_JS)}
                         if r is missing value then set r to ""
                         set out to out & "tab" & sep & (id of w as text) & sep & (id of t as text) & sep & r & linefeed
                     on error message
@@ -165,7 +180,7 @@ async function executeInTab(source: TrackSource, js: string): Promise<string> {
     }
     return runAppleScript(`
 tell application ${asString(source.browser)}
-    execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js.replace(/\s*\n\s*/g, ' '))}
+    execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
 end tell`)
 }
 
@@ -213,21 +228,81 @@ export async function evaluateAsyncInTab(source: TrackSource, body: string, time
 // Actions run one at a time so rapid presses reach the page in order.
 let actionQueue: Promise<unknown> = Promise.resolve()
 
-/** Runs a user action in one specific tab and starts following that tab. */
-async function runInTab(source: TrackSource, js: string): Promise<void> {
+const WAKE_TIMEOUT_MS = 3000
+const WAKE_POLL_MS = 100
+
+/**
+ * Wakes a tab Chromium hasn't loaded media in yet (see IS_ASLEEP_JS) by
+ * showing it in its window until the media loads, then switching back to
+ * the tab that was in front. Measured at about 0.6s; once loaded, the tab
+ * keeps working from the background.
+ */
+async function wakeIfAsleep(source: TrackSource): Promise<void> {
+    if ((await executeInTab(source, `String(${IS_ASLEEP_JS})`)) !== 'true') return
+
+    const tell = (body: string) =>
+        runAppleScript(`
+tell application ${asString(source.browser)}
+    set w to window id ${source.windowId}
+${body}
+end tell`)
+    const indexOf = (tabId: string) => `
+    set i to 0
+    repeat with t in tabs of w
+        set i to i + 1
+        if (id of t as text) is "${tabId}" then exit repeat
+    end repeat`
+
+    const previousTabId = await tell(`
+    set previousTabId to id of active tab of w
+${indexOf(String(source.tabId))}
+    set active tab index of w to i
+    return previousTabId as text`)
+    try {
+        const deadline = Date.now() + WAKE_TIMEOUT_MS
+        while (Date.now() < deadline) {
+            const readyState = Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`))
+            if (readyState >= 2) return
+            await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS))
+        }
+        throw new Error("Brave hasn't loaded this YouTube Music tab yet. Open it once to start playback.")
+    } finally {
+        // Switch back only if the user hasn't moved to another tab meanwhile.
+        // Brave reports tab ids as text, so they're compared as text.
+        if (/^\d+$/.test(previousTabId)) {
+            await tell(`
+    if (id of active tab of w as text) is "${source.tabId}" then
+${indexOf(previousTabId)}
+        set active tab index of w to i
+    end if`)
+        }
+    }
+}
+
+/**
+ * Runs a user action in one specific tab and starts following that tab.
+ * Actions that start playback pass wake, so a tab Chromium hasn't loaded yet
+ * gets woken right after the action asks it to play.
+ */
+async function runInTab(source: TrackSource, js: string, { wake = false } = {}): Promise<void> {
     // Whatever the user just acted on is the tab to follow.
     if (!followed || !isSameTab(followed, source)) {
         followed = source
         followedTrack = null
     }
-    const run = actionQueue.then(() => executeInTab(source, js))
+    const run = actionQueue.then(async () => {
+        await executeInTab(source, js)
+        if (wake) await wakeIfAsleep(source)
+    })
     actionQueue = run.catch(() => {})
     await run
 }
 
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
     if (!(action in CONTROL_SELECTORS)) throw new Error('Invalid player control')
-    await runInTab(source, `document.querySelector('ytmusic-player-bar ${CONTROL_SELECTORS[action]}')?.click()`)
+    await runInTab(source, `document.querySelector('ytmusic-player-bar ${CONTROL_SELECTORS[action]}')?.click()`, {
+        wake: true,
+    })
 }
 
 export async function setPlaying(source: TrackSource, playing: boolean): Promise<void> {
@@ -240,6 +315,7 @@ export async function setPlaying(source: TrackSource, playing: boolean): Promise
             const video = document.querySelector('video');
             if (video && video.paused === ${playing}) document.querySelector('ytmusic-player-bar #play-pause-button')?.click();
         })()`,
+        { wake: playing },
     )
 }
 
@@ -310,6 +386,7 @@ export async function playNow(videoId: string): Promise<void> {
             composed: true,
             detail: { endpoint: { watchEndpoint: { videoId: '${videoId}' } } },
         }))`,
+        { wake: true },
     )
 }
 

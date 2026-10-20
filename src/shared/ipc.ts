@@ -42,6 +42,8 @@ export interface Track {
     artworkUrl: string | null
     isPlaying: boolean
     repeatMode: RepeatMode
+    /** Chromium hasn't loaded media in this tab yet; playing wakes it first. */
+    isAsleep: boolean
     source: TrackSource
 }
 

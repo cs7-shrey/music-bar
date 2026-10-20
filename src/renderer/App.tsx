@@ -140,7 +140,13 @@ export default function App() {
                     value={PLAY_PAUSE_COMMAND}
                     icon={track?.isPlaying ? <Pause /> : <Play />}
                     title={track?.isPlaying ? 'Pause' : 'Play'}
-                    subtitle={track ? `“${track.title}”` : 'Nothing is playing'}
+                    subtitle={
+                        !track
+                            ? 'Nothing is playing'
+                            : track.isAsleep && !track.isPlaying
+                              ? `“${track.title}” · opens the tab for a moment to load it`
+                              : `“${track.title}”`
+                    }
                     muted={!track}
                     onSelect={nowPlaying.togglePlay}
                 />

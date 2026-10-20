@@ -178,6 +178,11 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop }: ReturnTyp
             <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-semibold">{track.title}</div>
                 <div className="truncate text-[13px] text-neutral-400">{track.artist}</div>
+                {track.isAsleep && !track.isPlaying && (
+                    <div className="truncate text-xs text-amber-300/90">
+                        Brave hasn't loaded this tab yet · Play opens it for a moment
+                    </div>
+                )}
             </div>
             <div className="flex items-center gap-1">
                 <ControlButton
