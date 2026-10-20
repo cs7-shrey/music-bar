@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ListMusic, Music2, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { ListMusic, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { SearchSong } from '../shared/ipc'
 import { NowPlaying, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
@@ -12,6 +12,7 @@ interface PlaybackCommand {
     icon: ReactNode
 }
 
+const PLAY_PAUSE_COMMAND = 'Play or Pause'
 const LOOP_COMMAND = 'Loop Current Song'
 
 // Placeholders until each command is wired to YouTube Music.
@@ -21,6 +22,8 @@ const SOON_COMMANDS: PlaybackCommand[] = [
     { id: 'play-now', title: 'Play Now', subtitle: 'Replace the current song', icon: <Play /> },
 ]
 
+const NOTICE_MS = 2500
+
 const matches = (query: string, ...texts: string[]) =>
     texts.some((text) => text.toLowerCase().includes(query.toLowerCase()))
 
@@ -28,7 +31,9 @@ export default function App() {
     const [query, setQuery] = useState('')
     // The query whose full search is on screen; null while typing.
     const [submitted, setSubmitted] = useState<string | null>(null)
-    const [selected, setSelected] = useState(LOOP_COMMAND)
+    const [selected, setSelected] = useState(PLAY_PAUSE_COMMAND)
+    // Brief confirmation shown in the footer, e.g. after queueing a song.
+    const [notice, setNotice] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
     const nowPlaying = useNowPlaying()
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
@@ -41,7 +46,7 @@ export default function App() {
     const reset = () => {
         setQuery('')
         setSubmitted(null)
-        setSelected(LOOP_COMMAND)
+        setSelected(PLAY_PAUSE_COMMAND)
     }
 
     useEffect(
@@ -62,12 +67,32 @@ export default function App() {
     const changeQuery = (next: string) => {
         setQuery(next)
         setSubmitted(null)
-        setSelected(next.trim() ? searchValue(next.trim()) : LOOP_COMMAND)
+        setSelected(next.trim() ? searchValue(next.trim()) : PLAY_PAUSE_COMMAND)
     }
 
     const submit = (searchQuery: string) => {
         setQuery(searchQuery)
         setSubmitted(searchQuery)
+    }
+
+    const liveSongs = live.results?.status === 'ok' ? live.results.songs : []
+    const fullSongs = full.results?.status === 'ok' ? full.results.songs : []
+    const songsOnScreen = submitted === null ? liveSongs : fullSongs
+    const selectedSong = songsOnScreen.find((song) => songValue(song) === selected)
+
+    useEffect(() => {
+        if (!notice) return
+        const timer = setTimeout(() => setNotice(null), NOTICE_MS)
+        return () => clearTimeout(timer)
+    }, [notice])
+
+    const queueNext = async (song: SearchSong) => {
+        try {
+            await window.musicBar.playNext(song)
+            setNotice(`“${song.title}” will play next`)
+        } catch {
+            setNotice(`Couldn't queue “${song.title}”`)
+        }
     }
 
     const play = (song: SearchSong) => {
@@ -76,7 +101,24 @@ export default function App() {
         reset()
     }
 
+    const toggleLoop = () => {
+        if (track) void nowPlaying.setLoop(!isLooping)
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
+        // ⇧↵ on a song queues it instead of playing it; the results stay up
+        // so several songs can be queued in a row.
+        if (event.key === 'Enter' && event.shiftKey && selectedSong) {
+            event.preventDefault()
+            void queueNext(selectedSong)
+            return
+        }
+        // ⌘L toggles the loop from anywhere, even mid-search.
+        if (event.metaKey && event.key.toLowerCase() === 'l') {
+            event.preventDefault()
+            toggleLoop()
+            return
+        }
         if (event.key !== 'Escape') return
         event.preventDefault()
         if (submitted !== null) {
@@ -86,12 +128,24 @@ export default function App() {
         else window.musicBar.hide()
     }
 
+    const showPlayPause = !trimmed || matches(trimmed, 'play', 'pause', 'resume')
     const showLoop = !trimmed || matches(trimmed, LOOP_COMMAND, 'repeat', 'stop looping')
     const soonCommands = SOON_COMMANDS.filter(
         (command) => !trimmed || matches(trimmed, command.title, command.subtitle),
     )
-    const commands = (showLoop || soonCommands.length > 0) && (
+    const commands = (showPlayPause || showLoop || soonCommands.length > 0) && (
         <Command.Group heading="Playback">
+            {showPlayPause && (
+                <CommandRow
+                    // Stable value so the selection does not jump when the title flips.
+                    value={PLAY_PAUSE_COMMAND}
+                    icon={track?.isPlaying ? <Pause /> : <Play />}
+                    title={track?.isPlaying ? 'Pause' : 'Play'}
+                    subtitle={track ? `“${track.title}”` : 'Nothing is playing'}
+                    muted={!track}
+                    onSelect={() => track && void nowPlaying.control('play-pause')}
+                />
+            )}
             {showLoop && (
                 <CommandRow
                     // Stable value so the selection does not jump when the title flips.
@@ -100,10 +154,11 @@ export default function App() {
                     title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
                     subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
                     badge={isLooping ? 'On' : undefined}
-                    // Dimmed rather than skipped: a missing first row would push
-                    // the selection onto a placeholder while the track loads.
+                    shortcut="⌘L"
+                    // Dimmed rather than skipped: a missing row would push the
+                    // selection onto a placeholder while the track loads.
                     muted={!track}
-                    onSelect={() => track && void nowPlaying.setLoop(!isLooping)}
+                    onSelect={toggleLoop}
                 />
             )}
             {soonCommands.map((command) => (
@@ -190,15 +245,19 @@ export default function App() {
             </Command.List>
 
             <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.03] px-4 text-xs text-neutral-400">
-                <span className="flex items-center gap-1.5">
-                    <Music2 className="size-3.5" />
-                    Music Bar
+                <span className="flex min-w-0 items-center gap-1.5">
+                    <Music2 className="size-3.5 shrink-0" />
+                    <span className={`truncate ${notice ? 'text-neutral-200' : ''}`}>{notice ?? 'Music Bar'}</span>
                 </span>
-                <span className="flex items-center gap-3">
-                    <Hint
-                        keys="↵"
-                        label={selected.startsWith('song:') ? 'Play Now' : selected.startsWith('search:') ? 'Search' : 'Select'}
-                    />
+                <span className="flex shrink-0 items-center gap-3">
+                    {selectedSong ? (
+                        <>
+                            <Hint keys="↵" label="Play Now" />
+                            <Hint keys="⇧↵" label="Play Next" />
+                        </>
+                    ) : (
+                        <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />
+                    )}
                     <Hint keys="esc" label={submitted !== null ? 'Back' : query ? 'Clear' : 'Close'} />
                 </span>
             </footer>
@@ -212,6 +271,7 @@ function CommandRow({
     title,
     subtitle,
     badge,
+    shortcut,
     muted,
     onSelect,
 }: {
@@ -220,6 +280,7 @@ function CommandRow({
     title: string
     subtitle: string
     badge?: string
+    shortcut?: string
     muted?: boolean
     onSelect?: () => void
 }) {
@@ -234,11 +295,18 @@ function CommandRow({
             </span>
             <span className="font-medium">{title}</span>
             <span className="truncate text-neutral-400">{subtitle}</span>
-            {badge && (
-                <span className="ml-auto rounded px-1.5 py-0.5 text-[11px] text-neutral-400 ring-1 ring-white/15">
-                    {badge}
-                </span>
-            )}
+            <span className="ml-auto flex shrink-0 items-center gap-2">
+                {badge && (
+                    <span className="rounded px-1.5 py-0.5 text-[11px] text-neutral-400 ring-1 ring-white/15">
+                        {badge}
+                    </span>
+                )}
+                {shortcut && (
+                    <kbd className="rounded bg-white/10 px-1.5 py-0.5 font-sans text-[11px] text-neutral-300">
+                        {shortcut}
+                    </kbd>
+                )}
+            </span>
         </Command.Item>
     )
 }

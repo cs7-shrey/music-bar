@@ -49,6 +49,7 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
     ipcMain.handle(IPC.playNow, (_event, videoId: string) => youtubeMusic.playNow(videoId))
+    ipcMain.handle(IPC.playNext, (_event, videoId: string) => youtubeMusic.playNext(videoId))
 
     if (!globalShortcut.register(SHORTCUT, toggleLauncher)) {
         console.warn(`[music-bar] could not register ${SHORTCUT}; another app may own it`)

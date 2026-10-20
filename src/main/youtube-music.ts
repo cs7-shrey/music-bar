@@ -257,11 +257,38 @@ export async function setLoop(source: TrackSource, enabled: boolean): Promise<vo
     )
 }
 
-/** Plays a song right away in the followed tab, replacing the current one. */
-export async function playNow(videoId: string): Promise<void> {
-    if (!/^[\w-]{11}$/.test(videoId)) throw new Error('Invalid video id')
+const VIDEO_ID = /^[\w-]{11}$/
+
+/** The followed tab, for actions on a song from search. */
+async function tabForSong(videoId: string): Promise<TrackSource> {
+    if (!VIDEO_ID.test(videoId)) throw new Error('Invalid video id')
     const tab = await defaultTab()
     if (!tab) throw new Error('Open YouTube Music in Brave, Chrome or Helium')
+    return tab
+}
+
+/**
+ * Wraps code so it runs in the page's own world, where YouTube Music's
+ * components live; `execute javascript` itself runs in an isolated world. The
+ * code goes in a <script> carrying the page's CSP nonce, built through a
+ * Trusted Types policy because the page requires them for script text.
+ * Each script runs at the page's top level, so the code is wrapped in a
+ * function: a bare `const` would stay declared and break the next injection.
+ */
+function inPageWorld(code: string): string {
+    return `(() => {
+        const policy = (window.__musicBarPolicy ??= trustedTypes.createPolicy('music-bar', { createScript: (text) => text }));
+        const script = document.createElement('script');
+        script.nonce = document.querySelector('script[nonce]')?.nonce ?? '';
+        script.textContent = policy.createScript(${JSON.stringify(`(() => { ${code} })()`)});
+        document.documentElement.appendChild(script);
+        script.remove();
+    })()`
+}
+
+/** Plays a song right away in the followed tab, replacing the current one. */
+export async function playNow(videoId: string): Promise<void> {
+    const tab = await tabForSong(videoId)
     // Asks the page's own router to open the song, the same event its links
     // fire, so it starts without a page reload.
     await runInTab(
@@ -271,5 +298,35 @@ export async function playNow(videoId: string): Promise<void> {
             composed: true,
             detail: { endpoint: { watchEndpoint: { videoId: '${videoId}' } } },
         }))`,
+    )
+}
+
+/** Queues a song right after the current one, like the menu's "Play next". */
+export async function playNext(videoId: string): Promise<void> {
+    const tab = await tabForSong(videoId)
+    // Queue edits have no event hook: the menu item runs its command through
+    // app internals. So this builds the same hidden menu item, with the
+    // command the real "Play next" carries, and runs its tap handler. A
+    // scripted click() only sometimes registers as a tap, so it calls onTap
+    // directly. On an empty queue the command plays the song instead.
+    await runInTab(
+        tab,
+        inPageWorld(`
+            const item = document.createElement('ytmusic-menu-service-item-renderer');
+            item.data = {
+                text: { runs: [{ text: 'Play next' }] },
+                icon: { iconType: 'QUEUE_PLAY_NEXT' },
+                serviceEndpoint: {
+                    queueAddEndpoint: {
+                        queueTarget: { videoId: '${videoId}', onEmptyQueue: { watchEndpoint: { videoId: '${videoId}' } } },
+                        queueInsertPosition: 'INSERT_AFTER_CURRENT_VIDEO',
+                    },
+                },
+            };
+            item.hidden = true;
+            document.querySelector('ytmusic-app').appendChild(item);
+            item.onTap(new CustomEvent('tap'));
+            setTimeout(() => item.remove(), 1000);
+        `),
     )
 }

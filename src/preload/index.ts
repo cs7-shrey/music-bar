@@ -17,6 +17,7 @@ const api: MusicBarApi = {
     suggest: (query) => ipcRenderer.invoke(IPC.searchSuggest, query),
     search: (query) => ipcRenderer.invoke(IPC.searchRun, query),
     playNow: (song) => ipcRenderer.invoke(IPC.playNow, song.videoId),
+    playNext: (song) => ipcRenderer.invoke(IPC.playNext, song.videoId),
 }
 
 contextBridge.exposeInMainWorld('musicBar', api)

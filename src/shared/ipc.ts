@@ -17,6 +17,8 @@ export const IPC = {
     searchRun: 'search:run',
     /** renderer → main (invoke): play a song now in the followed tab. */
     playNow: 'player:play-now',
+    /** renderer → main (invoke): queue a song right after the current one. */
+    playNext: 'player:play-next',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -71,4 +73,5 @@ export interface MusicBarApi {
     suggest(query: string): Promise<SearchResults>
     search(query: string): Promise<SearchResults>
     playNow(song: SearchSong): Promise<void>
+    playNext(song: SearchSong): Promise<void>
 }
