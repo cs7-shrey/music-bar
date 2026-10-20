@@ -144,6 +144,12 @@ export async function getNowPlaying(): Promise<NowPlaying> {
     const current = followed
     const isFollowed = (source: TrackSource) => current !== null && isSameTab(source, current)
     const followedTab = tabs.find((tab) => isFollowed(tab.source))
+    // Tab ids don't survive a browser restart or a closed tab; a followed
+    // tab that's gone would leave search and play now aimed at nothing.
+    if (current && !followedTab) {
+        followed = null
+        followedTrack = null
+    }
 
     // A playing tab always wins, the followed one first if several play.
     const playing =
