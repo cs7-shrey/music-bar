@@ -7,6 +7,11 @@ const POLL_MS = 2000
 const SETTLE_MS = 400
 // Loading a new song takes longer than pressing a player button.
 const PLAY_SETTLE_MS = 1200
+// Rapid presses of play/pause or loop only flip the UI; the page gets the
+// final state once the presses stop.
+const TOGGLE_DEBOUNCE_MS = 300
+
+type Toggle = 'play' | 'loop'
 
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
@@ -15,6 +20,10 @@ export function useNowPlaying() {
     // action carries stale state and would undo the optimistic update.
     const actionSeq = useRef(0)
     const actionsInFlight = useRef(0)
+    const toggleTimers = useRef<Partial<Record<Toggle, ReturnType<typeof setTimeout>>>>({})
+    // The track as last rendered, including optimistic flips; debounced
+    // toggles read their final target from it.
+    const latestTrack = useRef<Track | null>(null)
 
     const read = useCallback(async () => {
         const seq = actionSeq.current
@@ -53,13 +62,15 @@ export function useNowPlaying() {
         }
     }, [read])
 
-    /** Applies an optimistic update, runs the action, then re-reads the real state. */
-    const act = async (optimistic: (track: Track) => Track, run: () => Promise<void>, settleMs = SETTLE_MS) => {
+    const applyOptimistic = (optimistic: (track: Track) => Track) => {
         actionSeq.current++
-        actionsInFlight.current++
         setState((current) =>
             current?.status === 'track' ? { ...current, track: optimistic(current.track) } : current,
         )
+    }
+
+    /** Runs an action, then re-reads the real state once the page settles. */
+    const runAction = async (run: () => Promise<void>, settleMs: number) => {
         try {
             await run()
         } catch (error) {
@@ -73,25 +84,58 @@ export function useNowPlaying() {
         }, settleMs)
     }
 
-    const track = state?.status === 'track' ? state.track : null
+    /** Applies an optimistic update and runs the action right away. */
+    const act = async (optimistic: (track: Track) => Track, run: () => Promise<void>, settleMs = SETTLE_MS) => {
+        applyOptimistic(optimistic)
+        actionsInFlight.current++
+        await runAction(run, settleMs)
+    }
 
-    const control = async (action: PlayerControl) => {
+    /**
+     * Flips the UI now and sends the final state once presses stop, so
+     * pause-then-resume in quick succession sends nothing the page notices.
+     * The pending toggle counts as in flight, which keeps polls from
+     * overwriting the optimistic state meanwhile.
+     */
+    const debouncedToggle = (key: Toggle, flip: (track: Track) => Track, send: (track: Track) => Promise<void>) => {
+        if (!latestTrack.current) return
+        applyOptimistic(flip)
+        const pending = toggleTimers.current[key]
+        if (pending) clearTimeout(pending)
+        else actionsInFlight.current++
+        toggleTimers.current[key] = setTimeout(() => {
+            delete toggleTimers.current[key]
+            const target = latestTrack.current
+            void runAction(() => (target ? send(target) : Promise.resolve()), SETTLE_MS)
+        }, TOGGLE_DEBOUNCE_MS)
+    }
+
+    const track = state?.status === 'track' ? state.track : null
+    latestTrack.current = track
+
+    const control = (action: PlayerControl) => {
         if (!track) return
-        await act(
-            (current) => (action === 'play-pause' ? { ...current, isPlaying: !current.isPlaying } : current),
+        void act(
+            (current) => current,
             () => window.musicBar.control(track.source, action),
         )
     }
 
+    const togglePlay = () =>
+        debouncedToggle(
+            'play',
+            (current) => ({ ...current, isPlaying: !current.isPlaying }),
+            (target) => window.musicBar.setPlaying(target.source, target.isPlaying),
+        )
+
     // Turning the loop off restores the previous mode, which only the page
     // knows; 'NONE' is a placeholder until the re-read lands.
-    const setLoop = async (enabled: boolean) => {
-        if (!track) return
-        await act(
-            (current) => ({ ...current, repeatMode: enabled ? 'ONE' : 'NONE' }),
-            () => window.musicBar.setLoop(track.source, enabled),
+    const toggleLoop = () =>
+        debouncedToggle(
+            'loop',
+            (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
+            (target) => window.musicBar.setLoop(target.source, target.repeatMode === 'ONE'),
         )
-    }
 
     const playNow = (song: SearchSong) =>
         act(
@@ -107,10 +151,10 @@ export function useNowPlaying() {
             PLAY_SETTLE_MS,
         )
 
-    return { state, control, setLoop, playNow }
+    return { state, control, togglePlay, toggleLoop, playNow }
 }
 
-export function NowPlaying({ state, control, setLoop }: ReturnType<typeof useNowPlaying>) {
+export function NowPlaying({ state, control, togglePlay, toggleLoop }: ReturnType<typeof useNowPlaying>) {
     if (state?.status !== 'track') {
         return (
             <Card artwork={null}>
@@ -138,7 +182,7 @@ export function NowPlaying({ state, control, setLoop }: ReturnType<typeof useNow
             <div className="flex items-center gap-1">
                 <ControlButton
                     label={track.repeatMode === 'ONE' ? 'Stop looping' : 'Loop this song'}
-                    onClick={() => void setLoop(track.repeatMode !== 'ONE')}
+                    onClick={toggleLoop}
                     active={track.repeatMode === 'ONE'}
                 >
                     <Repeat1 className="size-[18px]" />
@@ -146,7 +190,7 @@ export function NowPlaying({ state, control, setLoop }: ReturnType<typeof useNow
                 <ControlButton label="Previous" onClick={() => void control('previous')}>
                     <SkipBack className="size-[18px]" fill="currentColor" />
                 </ControlButton>
-                <ControlButton label={track.isPlaying ? 'Pause' : 'Play'} onClick={() => void control('play-pause')} large>
+                <ControlButton label={track.isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} large>
                     {track.isPlaying ? (
                         <Pause className="size-6" fill="currentColor" strokeWidth={0} />
                     ) : (

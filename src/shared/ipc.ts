@@ -9,6 +9,8 @@ export const IPC = {
     nowPlayingGet: 'now-playing:get',
     /** renderer → main (invoke): press a player-bar control on a track's tab. */
     nowPlayingControl: 'now-playing:control',
+    /** renderer → main (invoke): play or pause a track's tab. */
+    nowPlayingSetPlaying: 'now-playing:set-playing',
     /** renderer → main (invoke): turn repeat-one on or off on a track's tab. */
     nowPlayingSetLoop: 'now-playing:set-loop',
     /** renderer → main (invoke): live suggestions and songs while typing. */
@@ -60,7 +62,7 @@ export type SearchResults =
     | { status: 'ok'; suggestions: string[]; songs: SearchSong[] }
     | { status: 'error'; message: string }
 
-export type PlayerControl = 'previous' | 'play-pause' | 'next'
+export type PlayerControl = 'previous' | 'next'
 
 export interface MusicBarApi {
     hide(): void
@@ -68,6 +70,8 @@ export interface MusicBarApi {
     onHidden(listener: () => void): () => void
     getNowPlaying(): Promise<NowPlaying>
     control(source: TrackSource, control: PlayerControl): Promise<void>
+    /** Plays or pauses; does nothing when the tab is already in that state. */
+    setPlaying(source: TrackSource, playing: boolean): Promise<void>
     /** Off restores the repeat mode that was on before looping started. */
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
     suggest(query: string): Promise<SearchResults>

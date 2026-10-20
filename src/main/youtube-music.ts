@@ -31,7 +31,6 @@ const READ_TRACK_JS = `(() => {
 
 const CONTROL_SELECTORS: Record<PlayerControl, string> = {
     previous: '.previous-button',
-    'play-pause': '#play-pause-button',
     next: '.next-button',
 }
 
@@ -229,6 +228,19 @@ async function runInTab(source: TrackSource, js: string): Promise<void> {
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
     if (!(action in CONTROL_SELECTORS)) throw new Error('Invalid player control')
     await runInTab(source, `document.querySelector('ytmusic-player-bar ${CONTROL_SELECTORS[action]}')?.click()`)
+}
+
+export async function setPlaying(source: TrackSource, playing: boolean): Promise<void> {
+    if (typeof playing !== 'boolean') throw new Error('Invalid play request')
+    // Sets a state rather than toggling, so a repeated or late request can't
+    // flip playback the wrong way.
+    await runInTab(
+        source,
+        `(() => {
+            const video = document.querySelector('video');
+            if (video && video.paused === ${playing}) document.querySelector('ytmusic-player-bar #play-pause-button')?.click();
+        })()`,
+    )
 }
 
 export async function setLoop(source: TrackSource, enabled: boolean): Promise<void> {

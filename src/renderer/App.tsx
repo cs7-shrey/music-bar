@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ListMusic, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { SearchSong } from '../shared/ipc'
 import { NowPlaying, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
@@ -17,7 +17,6 @@ const LOOP_COMMAND = 'Loop Current Song'
 
 // Placeholders until each command is wired to YouTube Music.
 const SOON_COMMANDS: PlaybackCommand[] = [
-    { id: 'play-next', title: 'Play Next', subtitle: 'Queue a song right after the current one', icon: <ListMusic /> },
     { id: 'start-radio', title: 'Start Radio', subtitle: 'Start a radio from another song', icon: <Radio /> },
     { id: 'play-now', title: 'Play Now', subtitle: 'Replace the current song', icon: <Play /> },
 ]
@@ -101,10 +100,6 @@ export default function App() {
         reset()
     }
 
-    const toggleLoop = () => {
-        if (track) void nowPlaying.setLoop(!isLooping)
-    }
-
     const handleKeyDown = (event: KeyboardEvent) => {
         // ⇧↵ on a song queues it instead of playing it; the results stay up
         // so several songs can be queued in a row.
@@ -113,10 +108,10 @@ export default function App() {
             void queueNext(selectedSong)
             return
         }
-        // ⌘L toggles the loop from anywhere, even mid-search.
-        if (event.metaKey && event.key.toLowerCase() === 'l') {
+        // ⌘O toggles the loop from anywhere, even mid-search.
+        if (event.metaKey && event.key.toLowerCase() === 'o') {
             event.preventDefault()
-            toggleLoop()
+            nowPlaying.toggleLoop()
             return
         }
         if (event.key !== 'Escape') return
@@ -143,7 +138,7 @@ export default function App() {
                     title={track?.isPlaying ? 'Pause' : 'Play'}
                     subtitle={track ? `“${track.title}”` : 'Nothing is playing'}
                     muted={!track}
-                    onSelect={() => track && void nowPlaying.control('play-pause')}
+                    onSelect={nowPlaying.togglePlay}
                 />
             )}
             {showLoop && (
@@ -154,11 +149,11 @@ export default function App() {
                     title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
                     subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
                     badge={isLooping ? 'On' : undefined}
-                    shortcut="⌘L"
+                    shortcut="⌘O"
                     // Dimmed rather than skipped: a missing row would push the
                     // selection onto a placeholder while the track loads.
                     muted={!track}
-                    onSelect={toggleLoop}
+                    onSelect={nowPlaying.toggleLoop}
                 />
             )}
             {soonCommands.map((command) => (

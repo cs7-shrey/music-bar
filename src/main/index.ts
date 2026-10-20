@@ -43,6 +43,9 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.nowPlayingControl, (_event, source: TrackSource, control: PlayerControl) =>
         youtubeMusic.control(source, control),
     )
+    ipcMain.handle(IPC.nowPlayingSetPlaying, (_event, source: TrackSource, playing: boolean) =>
+        youtubeMusic.setPlaying(source, playing),
+    )
     ipcMain.handle(IPC.nowPlayingSetLoop, (_event, source: TrackSource, enabled: boolean) =>
         youtubeMusic.setLoop(source, enabled),
     )
