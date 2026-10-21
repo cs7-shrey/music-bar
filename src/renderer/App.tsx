@@ -278,8 +278,8 @@ export default function App() {
 
             <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.06] px-5 text-xs font-semibold text-subdued">
                 <span className="flex min-w-0 items-center gap-2">
-                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent">
-                        <Music2 className="size-3 text-white" strokeWidth={2.5} />
+                    <span className="glass flex size-5 shrink-0 items-center justify-center rounded-full">
+                        <Music2 className="size-2.5 text-white" strokeWidth={2.5} />
                     </span>
                     <span className={`truncate ${notice ? 'text-white' : ''}`}>{notice ?? 'Music Bar'}</span>
                 </span>

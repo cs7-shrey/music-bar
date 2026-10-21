@@ -367,7 +367,7 @@ function Hero({
 function Artwork({ artwork }: { artwork: ArtworkState }) {
     const frame = 'size-[92px] shrink-0 rounded-md shadow-[0_8px_28px_rgba(0,0,0,0.55)]'
     if (artwork.src) {
-        return <img src={artwork.src} alt="" crossOrigin="anonymous" className={`${frame} object-cover`} />
+        return <img src={artwork.src} alt="" className={`${frame} object-cover`} />
     }
     // A plain tile while the art loads; the note only when there's none to show.
     if (artwork.status === 'loading') return <div className={`${frame} bg-highlight`} />
@@ -478,9 +478,6 @@ function formatTime(seconds: number): string {
 
 // Deep red for the header when there's no artwork, or its color can't be read.
 const FALLBACK_COLOR = 'rgb(110, 14, 30)'
-// A failed or hung artwork load is retried after each delay, then given up.
-const ARTWORK_RETRY_DELAYS_MS = [1000, 3000, 6000]
-const ARTWORK_ATTEMPT_TIMEOUT_MS = 8000
 
 export interface ArtworkState {
     /** The image to show once it has loaded; null while loading or failed. */
@@ -493,57 +490,40 @@ export interface ArtworkState {
 const NO_ARTWORK: ArtworkState = { src: null, status: 'none', color: FALLBACK_COLOR }
 
 /**
- * Loads the artwork once for both the image and the header color, retrying
- * failed or hung loads; a single transient failure used to leave the
- * placeholder up for the whole song. The image is loaded with CORS so its
- * pixels can be read (YouTube's image hosts allow it), and the displayed
- * <img> uses the same mode so it comes from the same cache entry.
+ * Loads the artwork once for both the image and the header color. The main
+ * process downloads it (see artwork.ts for why, and for the retries), so the
+ * image arrives as a data: URL whose pixels can be read for the color.
  */
 export function useArtwork(url: string | null): ArtworkState {
-    const [loaded, setLoaded] = useState<{ url: string; color: string } | null>(null)
+    const [loaded, setLoaded] = useState<{ url: string; src: string; color: string } | null>(null)
     const [failedUrl, setFailedUrl] = useState<string | null>(null)
 
     useEffect(() => {
         if (!url) return
         let cancelled = false
-        let attempt = 0
-        let retryTimer: ReturnType<typeof setTimeout> | undefined
-        let image: HTMLImageElement | null = null
-
-        const load = () => {
-            const current = new Image()
-            image = current
-            current.crossOrigin = 'anonymous'
-            const timeout = setTimeout(() => fail(), ARTWORK_ATTEMPT_TIMEOUT_MS)
-            const fail = () => {
-                clearTimeout(timeout)
-                current.onload = current.onerror = null
-                current.src = ''
-                if (cancelled) return
-                const delay = ARTWORK_RETRY_DELAYS_MS[attempt++]
-                if (delay === undefined) setFailedUrl(url)
-                else retryTimer = setTimeout(load, delay)
+        void (async () => {
+            try {
+                // Main downloads it (with retries) and hands back a data: URL.
+                const src = await window.musicBar.fetchArtwork(url)
+                const image = new Image()
+                image.src = src
+                await image.decode()
+                if (!cancelled) setLoaded({ url, src, color: dominantColor(image) })
+            } catch (error) {
+                console.warn(`[music-bar] artwork failed: ${url}`, error)
+                if (!cancelled) setFailedUrl(url)
             }
-            current.onload = () => {
-                clearTimeout(timeout)
-                if (!cancelled) setLoaded({ url, color: dominantColor(current) })
-            }
-            current.onerror = fail
-            current.src = url
-        }
-        load()
-
+        })()
         return () => {
             cancelled = true
-            clearTimeout(retryTimer)
-            if (image) image.onload = image.onerror = null
         }
     }, [url])
 
     if (!url) return NO_ARTWORK
-    if (loaded?.url === url) return { src: url, status: 'loaded', color: loaded.color }
-    const color = loaded?.color ?? FALLBACK_COLOR
-    return { src: null, status: failedUrl === url ? 'failed' : 'loading', color }
+    if (loaded?.url === url) return { src: loaded.src, status: 'loaded', color: loaded.color }
+    // Failed: the fallback, not the previous song's color, which no longer matches.
+    if (failedUrl === url) return { src: null, status: 'failed', color: FALLBACK_COLOR }
+    return { src: null, status: 'loading', color: loaded?.color ?? FALLBACK_COLOR }
 }
 
 /**

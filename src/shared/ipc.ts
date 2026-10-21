@@ -17,6 +17,8 @@ export const IPC = {
     nowPlayingLoadTab: 'now-playing:load-tab',
     /** renderer → main (invoke): turn repeat-one on or off on a track's tab. */
     nowPlayingSetLoop: 'now-playing:set-loop',
+    /** renderer → main (invoke): download a song's artwork as a data: URL. */
+    artworkFetch: 'artwork:fetch',
     /** renderer → main (invoke): live suggestions and songs while typing. */
     searchSuggest: 'search:suggest',
     /** renderer → main (invoke): the full search, as on /search?q=. */
@@ -90,6 +92,7 @@ export interface MusicBarApi {
     /** Off restores the repeat mode that was on before looping started. */
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
     loadTab(source: TrackSource): Promise<void>
+    fetchArtwork(url: string): Promise<string>
     suggest(query: string): Promise<SearchResults>
     search(query: string): Promise<SearchResults>
     playNow(song: SearchSong): Promise<void>

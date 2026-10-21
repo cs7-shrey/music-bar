@@ -3,6 +3,7 @@ import { IPC, type PlayerControl, type TrackSource } from '../shared/ipc'
 import { createLauncherWindow, hideLauncher, showLauncher, toggleLauncher } from './launcher-window'
 import * as youtubeMusic from './youtube-music'
 import * as youtubeMusicSearch from './youtube-music-search'
+import { fetchArtwork } from './artwork'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 
@@ -57,6 +58,7 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.nowPlayingSetLoop, (_event, source: TrackSource, enabled: boolean) =>
         youtubeMusic.setLoop(source, enabled),
     )
+    ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
     ipcMain.handle(IPC.playNow, (_event, videoId: string) => youtubeMusic.playNow(videoId))
