@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Command } from 'cmdk'
-import { Music2, Search } from 'lucide-react'
+import { Music2, Play, Search } from 'lucide-react'
 import type { SearchResults, SearchSong } from '../shared/ipc'
 
 // Waits for a pause in typing before asking YouTube Music; each request runs
@@ -49,12 +49,12 @@ export function SearchRow({ query, label, onSelect }: { query: string; label: st
         <Command.Item
             value={searchValue(query)}
             onSelect={onSelect}
-            className="flex h-10 items-center gap-3 rounded-lg px-2 text-sm data-[selected=true]:bg-white/10"
+            className="flex h-12 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08]"
         >
-            <span className="flex size-7 items-center justify-center text-neutral-400">
-                <Search className="size-4" />
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-subdued">
+                <Search className="size-[18px]" strokeWidth={2.25} />
             </span>
-            <span className="truncate">{label}</span>
+            <span className="truncate text-[15px] font-semibold">{label}</span>
         </Command.Item>
     )
 }
@@ -65,26 +65,36 @@ export function SongRow({ song, onSelect }: { song: SearchSong; onSelect: () => 
         <Command.Item
             value={songValue(song)}
             onSelect={onSelect}
-            className="flex h-12 items-center gap-3 rounded-lg px-2 text-sm data-[selected=true]:bg-white/10"
+            className="group flex h-14 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08]"
         >
-            {song.thumbnailUrl && !thumbnailFailed ? (
-                <img
-                    src={song.thumbnailUrl}
-                    alt=""
-                    onError={() => setThumbnailFailed(true)}
-                    className="size-9 shrink-0 rounded-md object-cover"
-                />
-            ) : (
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-white/10">
-                    <Music2 className="size-4 text-neutral-400" />
+            <span className="relative size-10 shrink-0 overflow-hidden rounded">
+                {song.thumbnailUrl && !thumbnailFailed ? (
+                    <img
+                        src={song.thumbnailUrl}
+                        alt=""
+                        onError={() => setThumbnailFailed(true)}
+                        className="size-full object-cover"
+                    />
+                ) : (
+                    <span className="flex size-full items-center justify-center bg-highlight">
+                        <Music2 className="size-4 text-subdued" />
+                    </span>
+                )}
+                {/* A play glyph over the art on the selected row, like Spotify's hover state. */}
+                <span className="absolute inset-0 flex items-center justify-center bg-black/55 opacity-0 transition-opacity group-data-[selected=true]:opacity-100">
+                    <Play className="size-4 text-white" fill="currentColor" strokeWidth={0} />
                 </span>
-            )}
-            <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{song.title}</span>
-                <span className="block truncate text-xs text-neutral-400">{song.artist}</span>
             </span>
-            <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-neutral-400 ring-1 ring-white/15">
-                {song.kind === 'song' ? 'Song' : 'Video'}
+            <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold">{song.title}</span>
+                <span className="flex items-center gap-1.5 truncate text-[13px] font-medium text-subdued">
+                    {song.kind === 'video' && (
+                        <span className="shrink-0 rounded-sm bg-white/20 px-1 text-[9px] leading-4 font-extrabold tracking-wide text-white/85">
+                            VIDEO
+                        </span>
+                    )}
+                    <span className="truncate">{song.artist}</span>
+                </span>
             </span>
         </Command.Item>
     )
@@ -92,5 +102,5 @@ export function SongRow({ song, onSelect }: { song: SearchSong; onSelect: () => 
 
 /** A non-selectable status line inside the list. */
 export function ListNote({ children }: { children: string }) {
-    return <div className="px-2 py-3 text-sm text-neutral-400">{children}</div>
+    return <div className="px-2 py-3 text-sm font-medium text-subdued">{children}</div>
 }

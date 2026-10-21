@@ -41,6 +41,9 @@ const READ_TRACK_JS = `(() => {
         isPlaying: !!video && !video.paused && !video.ended && video.readyState >= 2,
         repeatMode: document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode') || 'NONE',
         isAsleep: ${IS_ASLEEP_JS},
+        position: video ? video.currentTime : 0,
+        duration: video && Number.isFinite(video.duration) ? video.duration : null,
+        readAt: Date.now(),
     });
 })()`
 

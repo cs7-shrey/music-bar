@@ -22,11 +22,9 @@ export function createLauncherWindow(): BrowserWindow {
         // NSPanel so the launcher can float over full-screen apps without
         // pulling the user to another Space.
         type: 'panel',
+        // Transparent so the renderer's rounded, solid panel defines the shape.
         transparent: true,
         backgroundColor: '#00000000',
-        vibrancy: 'hud',
-        visualEffectState: 'active',
-        roundedCorners: true,
         hasShadow: true,
         webPreferences: {
             preload: join(__dirname, 'preload.js'),

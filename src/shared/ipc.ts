@@ -48,6 +48,12 @@ export interface Track {
     repeatMode: RepeatMode
     /** Chromium hasn't loaded media in this tab yet; playing wakes it first. */
     isAsleep: boolean
+    /** Seconds into the song when it was read. */
+    position: number
+    /** Song length in seconds; null until the media has loaded. */
+    duration: number | null
+    /** When position was read (ms since epoch), so the UI can advance it between reads. */
+    readAt: number
     source: TrackSource
 }
 

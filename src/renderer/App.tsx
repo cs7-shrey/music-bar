@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Command } from 'cmdk'
 import { Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { PlayerControl, SearchSong } from '../shared/ipc'
-import { NowPlaying, useNowPlaying } from './now-playing'
+import { NowPlaying, useArtworkColor, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
 interface PlaybackCommand {
@@ -38,6 +38,7 @@ export default function App() {
     const nowPlaying = useNowPlaying()
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
     const isLooping = track?.repeatMode === 'ONE'
+    const headerColor = useArtworkColor(track?.artworkUrl ?? null)
 
     const trimmed = query.trim()
     const live = useSuggestions(submitted === null ? query : '')
@@ -139,7 +140,7 @@ export default function App() {
                     // Same row and value, so ↵ right after opening loads the tab.
                     <CommandRow
                         value={PLAY_PAUSE_COMMAND}
-                        icon={<Play />}
+                        icon={<Play fill="currentColor" strokeWidth={0} />}
                         title="Load YouTube Music"
                         subtitle="Opens the inactive tab for a moment"
                         muted={nowPlaying.loadingTab}
@@ -149,7 +150,13 @@ export default function App() {
                     <CommandRow
                         // Stable value so the selection does not jump when the title flips.
                         value={PLAY_PAUSE_COMMAND}
-                        icon={track?.isPlaying ? <Pause /> : <Play />}
+                        icon={
+                            track?.isPlaying ? (
+                                <Pause fill="currentColor" strokeWidth={0} />
+                            ) : (
+                                <Play fill="currentColor" strokeWidth={0} />
+                            )
+                        }
                         title={track?.isPlaying ? 'Pause' : 'Play'}
                         subtitle={
                             !track
@@ -166,10 +173,9 @@ export default function App() {
                 <CommandRow
                     // Stable value so the selection does not jump when the title flips.
                     value={LOOP_COMMAND}
-                    icon={<Repeat1 />}
+                    icon={<Repeat1 strokeWidth={2.25} />}
                     title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
                     subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
-                    badge={isLooping ? 'On' : undefined}
                     shortcut="⌘O"
                     // Dimmed rather than skipped: a missing row would push the
                     // selection onto a placeholder while the track loads.
@@ -203,26 +209,36 @@ export default function App() {
             value={selected}
             onValueChange={setSelected}
             onKeyDown={handleKeyDown}
-            className="flex h-full flex-col bg-[#161618]/85 text-neutral-100"
+            className="flex h-full flex-col overflow-hidden rounded-[18px] bg-base text-white ring-1 ring-white/[0.07] ring-inset"
         >
-            <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
-                <Search className="size-[18px] text-neutral-400" />
-                <Command.Input
-                    ref={inputRef}
-                    autoFocus
-                    value={query}
-                    onValueChange={changeQuery}
-                    placeholder="Search YouTube Music or run a command…"
-                    className="h-full flex-1 bg-transparent text-[17px] outline-none placeholder:text-neutral-400"
-                />
-                {(live.loading || full.loading) && (
-                    <span className="size-4 animate-spin rounded-full border-2 border-white/15 border-t-white/60" />
-                )}
-            </div>
+            {/* The header takes its color from the artwork and fades into the page, as Spotify's now-playing view does. */}
+            <header
+                className="relative shrink-0 transition-[background-color] duration-700"
+                style={{ backgroundColor: headerColor }}
+            >
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/0 via-base/55 to-base" />
+                <div className="relative">
+                    <div className="px-3 pt-3">
+                        <div className="flex h-11 items-center gap-3 rounded-full bg-black/35 px-4 ring-1 ring-white/10 transition focus-within:bg-black/45 focus-within:ring-white/25">
+                            <Search className="size-5 shrink-0 text-subdued" strokeWidth={2.25} />
+                            <Command.Input
+                                ref={inputRef}
+                                autoFocus
+                                value={query}
+                                onValueChange={changeQuery}
+                                placeholder="What do you want to play?"
+                                className="h-full min-w-0 flex-1 bg-transparent text-[15px] font-semibold text-white outline-none placeholder:font-medium placeholder:text-subdued"
+                            />
+                            {(live.loading || full.loading) && (
+                                <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                            )}
+                        </div>
+                    </div>
+                    {trimmed ? <div className="h-2" /> : <NowPlaying {...nowPlaying} />}
+                </div>
+            </header>
 
-            {!trimmed && <NowPlaying {...nowPlaying} />}
-
-            <Command.List className="min-h-0 flex-1 overflow-y-auto px-2 pt-1 pb-2">
+            <Command.List className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
                 {!trimmed && commands}
 
                 {trimmed && submitted === null && (
@@ -260,16 +276,18 @@ export default function App() {
                 )}
             </Command.List>
 
-            <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.03] px-4 text-xs text-neutral-400">
-                <span className="flex min-w-0 items-center gap-1.5">
-                    <Music2 className="size-3.5 shrink-0" />
-                    <span className={`truncate ${notice ? 'text-neutral-200' : ''}`}>{notice ?? 'Music Bar'}</span>
+            <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.06] px-5 text-xs font-semibold text-subdued">
+                <span className="flex min-w-0 items-center gap-2">
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-accent">
+                        <Music2 className="size-3 text-white" strokeWidth={2.5} />
+                    </span>
+                    <span className={`truncate ${notice ? 'text-white' : ''}`}>{notice ?? 'Music Bar'}</span>
                 </span>
-                <span className="flex shrink-0 items-center gap-3">
+                <span className="flex shrink-0 items-center gap-4">
                     {selectedSong ? (
                         <>
-                            <Hint keys="↵" label="Play Now" />
-                            <Hint keys="⇧↵" label="Play Next" />
+                            <Hint keys="↵" label="Play" />
+                            <Hint keys="⇧↵" label="Play next" />
                         </>
                     ) : (
                         <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />
@@ -304,24 +322,24 @@ function CommandRow({
         <Command.Item
             value={value}
             onSelect={onSelect}
-            className={`flex h-11 items-center gap-3 rounded-lg px-2 text-sm data-[selected=true]:bg-white/10 ${muted ? 'opacity-50' : ''}`}
+            className={`group flex h-12 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08] ${muted ? 'opacity-50' : ''}`}
         >
-            <span className="flex size-7 items-center justify-center rounded-md bg-red-500/90 text-white [&>svg]:size-4">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-white [&>svg]:size-[18px]">
                 {icon}
             </span>
             {/* The title keeps its width; a long subtitle truncates instead. */}
-            <span className="shrink-0 whitespace-nowrap font-medium">{title}</span>
-            <span className="min-w-0 truncate text-neutral-400">{subtitle}</span>
-            <span className="ml-auto flex shrink-0 items-center gap-2">
+            <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">{title}</span>
+            <span className="min-w-0 truncate text-[13px] font-medium text-subdued">{subtitle}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-3">
                 {badge && (
-                    <span className="rounded px-1.5 py-0.5 text-[11px] text-neutral-400 ring-1 ring-white/15">
+                    <span className="rounded-full bg-white/[0.07] px-2.5 py-0.5 text-[11px] font-bold text-subdued">
                         {badge}
                     </span>
                 )}
                 {shortcut && (
-                    <kbd className="rounded bg-white/10 px-1.5 py-0.5 font-sans text-[11px] text-neutral-300">
+                    <span className="text-xs font-semibold text-faint group-data-[selected=true]:text-subdued">
                         {shortcut}
-                    </kbd>
+                    </span>
                 )}
             </span>
         </Command.Item>
@@ -330,9 +348,9 @@ function CommandRow({
 
 function Hint({ keys, label }: { keys: string; label: string }) {
     return (
-        <span className="flex items-center gap-1.5">
+        <span>
+            <span className="mr-1 text-white">{keys}</span>
             {label}
-            <kbd className="rounded bg-white/10 px-1.5 py-0.5 font-sans text-[11px]">{keys}</kbd>
         </span>
     )
 }

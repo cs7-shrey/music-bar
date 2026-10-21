@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Music2, Pause, Play, Repeat1, SkipBack, SkipForward } from 'lucide-react'
-import type { NowPlaying as NowPlayingState, PlayerControl, SearchSong, Track } from '../shared/ipc'
+import { Music2, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
+import type { NowPlaying as NowPlayingState, PlayerControl, RepeatMode, SearchSong, Track } from '../shared/ipc'
 
 const POLL_MS = 2000
 // After an action, the acted-on tab is re-read this often until the change
@@ -251,108 +251,125 @@ export function NowPlaying({
                 : state?.status === 'unloaded'
                   ? loadingTab
                       ? ['Loading YouTube Music…', 'Opening the tab for a moment']
-                      : ['YouTube Music tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
+                      : ['Your tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
                   : ['Nothing playing', 'Open YouTube Music in Brave, Chrome or Helium']
         return (
-            <Card artwork={null} stale={stale}>
-                <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-semibold">{title}</div>
-                    <div className="line-clamp-2 text-[13px] text-neutral-400">{detail}</div>
-                </div>
-            </Card>
+            <Hero stale={stale} artwork={null} eyebrow="YouTube Music">
+                <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{title}</h1>
+                <p className="line-clamp-2 text-sm font-medium text-subdued">{detail}</p>
+            </Hero>
         )
     }
 
     const { track } = state
+    const looping = track.repeatMode === 'ONE'
+    const repeatLabel = { NONE: 'Repeat off', ALL: 'Repeating all', ONE: 'Looping this song' }[track.repeatMode]
     return (
-        <Card artwork={track.artworkUrl} stale={stale}>
-            <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-semibold">{track.title}</div>
-                <div className="truncate text-[13px] text-neutral-400">{track.artist}</div>
-                {track.isAsleep && !track.isPlaying && (
-                    <div className="truncate text-xs text-amber-300/90">
-                        Brave hasn't loaded this tab yet · Play opens it for a moment
-                    </div>
-                )}
-            </div>
-            <div className="flex items-center gap-1">
-                <ControlButton
-                    label={track.repeatMode === 'ONE' ? 'Stop looping (⌘O)' : 'Loop this song (⌘O)'}
-                    onClick={toggleLoop}
-                    active={track.repeatMode === 'ONE'}
-                >
-                    <Repeat1 className="size-[18px]" />
-                </ControlButton>
-                <ControlButton label="Previous (⌘H)" onClick={() => void control('previous')}>
-                    <SkipBack className="size-[18px]" fill="currentColor" />
-                </ControlButton>
-                <ControlButton label={track.isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} large>
-                    {track.isPlaying ? (
-                        <Pause className="size-6" fill="currentColor" strokeWidth={0} />
-                    ) : (
-                        <Play className="size-6" fill="currentColor" strokeWidth={0} />
-                    )}
-                </ControlButton>
-                <ControlButton label="Next (⌘L)" onClick={() => void control('next')}>
-                    <SkipForward className="size-[18px]" fill="currentColor" />
-                </ControlButton>
-            </div>
-        </Card>
+        <Hero
+            stale={stale}
+            artwork={track.artworkUrl}
+            eyebrow={track.isPlaying ? 'Now playing' : 'Paused'}
+            controls={
+                <div className="flex items-center gap-1.5">
+                    <IconButton
+                        label={`${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`}
+                        onClick={toggleLoop}
+                        active={track.repeatMode !== 'NONE'}
+                    >
+                        <RepeatIcon mode={track.repeatMode} />
+                    </IconButton>
+                    <IconButton label="Previous (⌘H)" onClick={() => void control('previous')}>
+                        <SkipBack className="size-5" fill="currentColor" strokeWidth={0} />
+                    </IconButton>
+                    <button
+                        type="button"
+                        aria-label={track.isPlaying ? 'Pause' : 'Play'}
+                        title={track.isPlaying ? 'Pause' : 'Play'}
+                        tabIndex={-1}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={togglePlay}
+                        className="flex size-12 items-center justify-center rounded-full bg-accent text-white transition hover:scale-105 hover:bg-accent-bright active:scale-95"
+                    >
+                        {track.isPlaying ? (
+                            <Pause className="size-5" fill="currentColor" strokeWidth={0} />
+                        ) : (
+                            <Play className="ml-0.5 size-5" fill="currentColor" strokeWidth={0} />
+                        )}
+                    </button>
+                    <IconButton label="Next (⌘L)" onClick={() => void control('next')}>
+                        <SkipForward className="size-5" fill="currentColor" strokeWidth={0} />
+                    </IconButton>
+                </div>
+            }
+            footer={<Progress track={track} />}
+        >
+            <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{track.title}</h1>
+            <p className="truncate text-sm font-semibold text-subdued">{track.artist}</p>
+            {track.isAsleep && !track.isPlaying && (
+                <p className="truncate text-xs font-medium text-subdued">
+                    <span className="mr-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" />
+                    Brave hasn't loaded this tab yet · Play opens it for a moment
+                </p>
+            )}
+        </Hero>
     )
 }
 
-function Card({
-    artwork: artworkUrl,
+/** The now-playing block: artwork, a small label, title lines, controls and progress. */
+function Hero({
+    artwork,
+    eyebrow,
     stale,
+    controls,
+    footer,
     children,
 }: {
     artwork: string | null
-    /** Dims the card while it shows state from before the launcher opened. */
+    eyebrow: string
+    /** Dims the block while it shows state from before the launcher opened. */
     stale: boolean
+    controls?: ReactNode
+    footer?: ReactNode
     children: ReactNode
 }) {
+    return (
+        <section className={`flex flex-col gap-3 px-5 pt-4 pb-4 transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}>
+            <div className="flex items-end gap-4">
+                <Artwork url={artwork} />
+                <div className="flex min-w-0 flex-1 flex-col gap-1 pb-1">
+                    <span className="text-xs font-bold text-white/80">{eyebrow}</span>
+                    {children}
+                </div>
+                {controls && <div className="shrink-0 pb-1">{controls}</div>}
+            </div>
+            {footer}
+        </section>
+    )
+}
+
+function Artwork({ url }: { url: string | null }) {
     // A failed load falls back to the placeholder instead of a broken image.
     // Keyed by URL, so the next song gets a fresh attempt.
     const [failedUrl, setFailedUrl] = useState<string | null>(null)
-    const artwork = artworkUrl !== failedUrl ? artworkUrl : null
-    const onError = () => setFailedUrl(artworkUrl)
-
-    return (
-        <div
-            className={`relative mx-2 mt-2 shrink-0 overflow-hidden rounded-xl bg-white/[0.04] transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}
-        >
-            {artwork && (
-                <img
-                    src={artwork}
-                    alt=""
-                    onError={onError}
-                    className="pointer-events-none absolute inset-0 size-full scale-150 object-cover opacity-30 blur-2xl"
-                />
-            )}
-            <div className="relative flex items-center gap-4 p-3">
-                {artwork ? (
-                    <img src={artwork} alt="" onError={onError} className="size-16 shrink-0 rounded-lg object-cover shadow-lg shadow-black/40" />
-                ) : (
-                    <div className="flex size-16 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-red-500 to-rose-700 shadow-lg shadow-black/40">
-                        <Music2 className="size-6 text-white" />
-                    </div>
-                )}
-                {children}
-            </div>
+    const shown = url !== failedUrl ? url : null
+    const frame = 'size-[92px] shrink-0 rounded-md shadow-[0_8px_28px_rgba(0,0,0,0.55)]'
+    return shown ? (
+        <img src={shown} alt="" onError={() => setFailedUrl(url)} className={`${frame} object-cover`} />
+    ) : (
+        <div className={`${frame} flex items-center justify-center bg-gradient-to-br from-accent to-[#7a0019]`}>
+            <Music2 className="size-9 text-white" strokeWidth={2.25} />
         </div>
     )
 }
 
-function ControlButton({
+function IconButton({
     label,
     onClick,
-    large,
     active,
     children,
 }: {
     label: string
     onClick: () => void
-    large?: boolean
     active?: boolean
     children: ReactNode
 }) {
@@ -365,11 +382,129 @@ function ControlButton({
             // Keep focus in the search input.
             onMouseDown={(event) => event.preventDefault()}
             onClick={onClick}
-            className={`flex items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95 ${large ? 'size-11' : 'size-9'} ${active ? 'text-red-400 hover:text-red-300' : 'text-neutral-200 hover:text-white'}`}
+            // Active is white rather than red: the header takes the artwork's
+            // color, and red on a red cover disappears.
+            className={`flex size-9 items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95 ${active ? 'text-white' : 'text-subdued hover:text-white'}`}
         >
             {children}
         </button>
     )
+}
+
+/**
+ * YouTube Music's repeat icon for each mode: plain when off, a dot in the
+ * middle for the whole queue, a 1 for the current song. Paths are lucide's
+ * Repeat and Repeat1; lucide has no dotted variant.
+ */
+function RepeatIcon({ mode }: { mode: RepeatMode }) {
+    return (
+        <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.25}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-[19px]"
+            aria-hidden="true"
+        >
+            <path d="m17 2 4 4-4 4" />
+            <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+            <path d="m7 22-4-4 4-4" />
+            <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+            {mode === 'ALL' && <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />}
+            {mode === 'ONE' && <path d="M11 10h1v4" />}
+        </svg>
+    )
+}
+
+/** Song progress; advances locally between reads while the song plays. */
+function Progress({ track }: { track: Track }) {
+    const [now, setNow] = useState(() => Date.now())
+    useEffect(() => {
+        if (!track.isPlaying) return
+        const timer = setInterval(() => setNow(Date.now()), 500)
+        return () => clearInterval(timer)
+    }, [track.isPlaying])
+
+    const elapsed = track.isPlaying ? Math.max(0, (now - track.readAt) / 1000) : 0
+    const duration = track.duration
+    const position = duration ? Math.min(track.position + elapsed, duration) : track.position + elapsed
+    const fraction = duration ? position / duration : 0
+
+    return (
+        <div className="flex items-center gap-2.5 text-[11px] font-medium text-subdued tabular-nums">
+            <span className="w-9 text-right">{formatTime(position)}</span>
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/20">
+                <div className="h-full rounded-full bg-white" style={{ width: `${fraction * 100}%` }} />
+            </div>
+            <span className="w-9">{duration ? formatTime(duration) : '–:––'}</span>
+        </div>
+    )
+}
+
+function formatTime(seconds: number): string {
+    const whole = Math.floor(seconds)
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
+
+// Deep red used when there's no artwork, or its color can't be read.
+const FALLBACK_COLOR = 'rgb(110, 14, 30)'
+
+/**
+ * The artwork's dominant color, darkened enough for white text on top, for
+ * the header's wash. Saturated pixels count for more, so a colorful cover on
+ * a grey background still reads as its color. YouTube's image hosts allow
+ * cross-origin reads, which the canvas needs.
+ */
+export function useArtworkColor(url: string | null): string {
+    const [color, setColor] = useState(FALLBACK_COLOR)
+    useEffect(() => {
+        if (!url) {
+            setColor(FALLBACK_COLOR)
+            return
+        }
+        let cancelled = false
+        const image = new Image()
+        image.crossOrigin = 'anonymous'
+        image.onload = () => {
+            if (cancelled) return
+            try {
+                const canvas = document.createElement('canvas')
+                canvas.width = canvas.height = 24
+                const context = canvas.getContext('2d', { willReadFrequently: true })!
+                context.drawImage(image, 0, 0, 24, 24)
+                const pixels = context.getImageData(0, 0, 24, 24).data
+                let r = 0
+                let g = 0
+                let b = 0
+                let total = 0
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const max = Math.max(pixels[i], pixels[i + 1], pixels[i + 2])
+                    const min = Math.min(pixels[i], pixels[i + 1], pixels[i + 2])
+                    const weight = 0.1 + (max === 0 ? 0 : (max - min) / max) * (max / 255)
+                    r += pixels[i] * weight
+                    g += pixels[i + 1] * weight
+                    b += pixels[i + 2] * weight
+                    total += weight
+                }
+                // Scale so the brightest channel lands around 150: rich, but dark.
+                const scale = 150 / Math.max(r / total, g / total, b / total, 1)
+                const channel = (value: number) => Math.round(Math.min(255, (value / total) * scale))
+                setColor(`rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`)
+            } catch {
+                setColor(FALLBACK_COLOR)
+            }
+        }
+        image.onerror = () => {
+            if (!cancelled) setColor(FALLBACK_COLOR)
+        }
+        image.src = url
+        return () => {
+            cancelled = true
+        }
+    }, [url])
+    return color
 }
 
 function describeError(message: string): string {
