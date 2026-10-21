@@ -134,23 +134,34 @@ export default function App() {
     )
     const commands = (showPlayPause || showLoop || soonCommands.length > 0) && (
         <Command.Group heading="Playback">
-            {showPlayPause && (
-                <CommandRow
-                    // Stable value so the selection does not jump when the title flips.
-                    value={PLAY_PAUSE_COMMAND}
-                    icon={track?.isPlaying ? <Pause /> : <Play />}
-                    title={track?.isPlaying ? 'Pause' : 'Play'}
-                    subtitle={
-                        !track
-                            ? 'Nothing is playing'
-                            : track.isAsleep && !track.isPlaying
-                              ? `“${track.title}” · opens the tab for a moment to load it`
-                              : `“${track.title}”`
-                    }
-                    muted={!track}
-                    onSelect={nowPlaying.togglePlay}
-                />
-            )}
+            {showPlayPause &&
+                (nowPlaying.state?.status === 'unloaded' ? (
+                    // Same row and value, so ↵ right after opening loads the tab.
+                    <CommandRow
+                        value={PLAY_PAUSE_COMMAND}
+                        icon={<Play />}
+                        title="Load YouTube Music"
+                        subtitle="Opens the inactive tab for a moment"
+                        muted={nowPlaying.loadingTab}
+                        onSelect={() => void nowPlaying.loadTab()}
+                    />
+                ) : (
+                    <CommandRow
+                        // Stable value so the selection does not jump when the title flips.
+                        value={PLAY_PAUSE_COMMAND}
+                        icon={track?.isPlaying ? <Pause /> : <Play />}
+                        title={track?.isPlaying ? 'Pause' : 'Play'}
+                        subtitle={
+                            !track
+                                ? 'Nothing is playing'
+                                : track.isAsleep && !track.isPlaying
+                                  ? `“${track.title}” · opens the tab for a moment to load it`
+                                  : `“${track.title}”`
+                        }
+                        muted={!track}
+                        onSelect={nowPlaying.togglePlay}
+                    />
+                ))}
             {showLoop && (
                 <CommandRow
                     // Stable value so the selection does not jump when the title flips.

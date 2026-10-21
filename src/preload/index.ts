@@ -14,6 +14,7 @@ const api: MusicBarApi = {
     getNowPlaying: () => ipcRenderer.invoke(IPC.nowPlayingGet),
     control: (source, control) => ipcRenderer.invoke(IPC.nowPlayingControl, source, control),
     setPlaying: (source, playing) => ipcRenderer.invoke(IPC.nowPlayingSetPlaying, source, playing),
+    loadTab: (source) => ipcRenderer.invoke(IPC.nowPlayingLoadTab, source),
     setLoop: (source, enabled) => ipcRenderer.invoke(IPC.nowPlayingSetLoop, source, enabled),
     suggest: (query) => ipcRenderer.invoke(IPC.searchSuggest, query),
     search: (query) => ipcRenderer.invoke(IPC.searchRun, query),

@@ -11,6 +11,8 @@ export const IPC = {
     nowPlayingControl: 'now-playing:control',
     /** renderer → main (invoke): play or pause a track's tab. */
     nowPlayingSetPlaying: 'now-playing:set-playing',
+    /** renderer → main (invoke): get Brave to load a tab it restored without loading. */
+    nowPlayingLoadTab: 'now-playing:load-tab',
     /** renderer → main (invoke): turn repeat-one on or off on a track's tab. */
     nowPlayingSetLoop: 'now-playing:set-loop',
     /** renderer → main (invoke): live suggestions and songs while typing. */
@@ -50,6 +52,8 @@ export interface Track {
 export type NowPlaying =
     | { status: 'track'; track: Track }
     | { status: 'none' }
+    /** A YT Music tab Brave hasn't loaded yet (restored at launch, or discarded to save memory). */
+    | { status: 'unloaded'; source: TrackSource }
     | { status: 'error'; message: string }
 
 export interface SearchSong {
@@ -76,6 +80,7 @@ export interface MusicBarApi {
     setPlaying(source: TrackSource, playing: boolean): Promise<void>
     /** Off restores the repeat mode that was on before looping started. */
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
+    loadTab(source: TrackSource): Promise<void>
     suggest(query: string): Promise<SearchResults>
     search(query: string): Promise<SearchResults>
     playNow(song: SearchSong): Promise<void>

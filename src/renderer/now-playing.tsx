@@ -151,22 +151,37 @@ export function useNowPlaying() {
             PLAY_SETTLE_MS,
         )
 
-    return { state, control, togglePlay, toggleLoop, playNow }
+    const [loadingTab, setLoadingTab] = useState(false)
+
+    /** Gets Brave to load an inactive YT Music tab; the next read shows its song. */
+    const loadTab = async () => {
+        if (state?.status !== 'unloaded' || loadingTab) return
+        const { source } = state
+        setLoadingTab(true)
+        actionSeq.current++
+        actionsInFlight.current++
+        await runAction(() => window.musicBar.loadTab(source), SETTLE_MS)
+        setLoadingTab(false)
+    }
+
+    return { state, control, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
 }
 
-export function NowPlaying({ state, control, togglePlay, toggleLoop }: ReturnType<typeof useNowPlaying>) {
+export function NowPlaying({ state, control, togglePlay, toggleLoop, loadingTab }: ReturnType<typeof useNowPlaying>) {
     if (state?.status !== 'track') {
+        const [title, detail] =
+            state?.status === 'error'
+                ? ["Can't reach YouTube Music", describeError(state.message)]
+                : state?.status === 'unloaded'
+                  ? loadingTab
+                      ? ['Loading YouTube Music…', 'Opening the tab for a moment']
+                      : ['YouTube Music tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
+                  : ['Nothing playing', 'Open YouTube Music in Brave, Chrome or Helium']
         return (
             <Card artwork={null}>
                 <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-semibold">
-                        {state?.status === 'error' ? "Can't reach YouTube Music" : 'Nothing playing'}
-                    </div>
-                    <div className="line-clamp-2 text-[13px] text-neutral-400">
-                        {state?.status === 'error'
-                            ? describeError(state.message)
-                            : 'Open YouTube Music in Brave, Chrome or Helium'}
-                    </div>
+                    <div className="truncate text-[15px] font-semibold">{title}</div>
+                    <div className="line-clamp-2 text-[13px] text-neutral-400">{detail}</div>
                 </div>
             </Card>
         )
@@ -273,6 +288,9 @@ function ControlButton({
 function describeError(message: string): string {
     if (/JavaScript through AppleScript is turned off/i.test(message)) {
         return 'Turn on View → Developer → Allow JavaScript from Apple Events in your browser.'
+    }
+    if (/AppleEvent timed out/i.test(message)) {
+        return "The browser didn't answer in time. Try again in a moment."
     }
     if (/Not authorized to send Apple events/i.test(message)) {
         return 'Allow Music Bar to control your browser in System Settings → Privacy & Security → Automation.'

@@ -60,15 +60,23 @@ function asString(value: string): string {
 
 function runAppleScript(script: string): Promise<string> {
     return new Promise((resolve, reject) => {
-        execFile('osascript', ['-e', script], { timeout: 5000 }, (error, stdout, stderr) => {
+        execFile('osascript', ['-e', script], { timeout: 10_000 }, (error, stdout, stderr) => {
             if (error) reject(new Error(stderr.trim() || error.message))
             else resolve(stdout.trim())
         })
     })
 }
 
-/** One YT Music tab (with or without a loaded track), or a failed read. */
-type TabResult = { source: TrackSource; track: Track | null } | { error: string }
+/**
+ * One YT Music tab, or a failed read. `loaded` is false for a tab Brave hasn't
+ * loaded (restored at launch without being opened, or discarded to save
+ * memory): its scripts never answer, and Brave's tab info doesn't say so.
+ */
+type TabResult = { source: TrackSource; track: Track | null; loaded: boolean } | { error: string }
+
+// How long one tab gets to answer before it counts as not loaded. Without a
+// limit, one unloaded tab hangs the whole read.
+const TAB_ANSWER_SECONDS = 1
 
 // The tab Music Bar follows: the last one seen playing or controlled. Without
 // this, a pause or the gap between songs hands the card to whichever other
@@ -104,11 +112,17 @@ if application ${asString(browser)} is running then
             repeat with t in tabs of w
                 if URL of t starts with ${asString(YT_MUSIC_URL)} then
                     try
-                        set r to execute t javascript ${asString(READ_TRACK_JS)}
+                        with timeout of ${TAB_ANSWER_SECONDS} seconds
+                            set r to execute t javascript ${asString(READ_TRACK_JS)}
+                        end timeout
                         if r is missing value then set r to ""
                         set out to out & "tab" & sep & (id of w as text) & sep & (id of t as text) & sep & r & linefeed
-                    on error message
-                        set out to out & "error" & sep & message & linefeed
+                    on error message number errorNumber
+                        if errorNumber is -1712 then
+                            set out to out & "unloaded" & sep & (id of w as text) & sep & (id of t as text) & linefeed
+                        else
+                            set out to out & "error" & sep & message & linefeed
+                        end if
                     end try
                 end if
             end repeat
@@ -132,14 +146,16 @@ return out`
             if (kind === 'error') return { error: rest.join('\t') }
             const [windowId, tabId, json] = rest
             const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
-            return { source, track: json ? { ...JSON.parse(json), source } : null }
+            if (kind === 'unloaded') return { source, track: null, loaded: false }
+            return { source, track: json ? { ...JSON.parse(json), source } : null, loaded: true }
         })
 }
 
 export async function getNowPlaying(): Promise<NowPlaying> {
     const results = (await Promise.all(installed.map(readBrowser))).flat()
     const tabs = results.flatMap((result) => ('source' in result ? [result] : []))
-    knownTabs = tabs.map((tab) => tab.source)
+    // Loaded tabs first, so search and play now avoid a tab that can't answer.
+    knownTabs = [...tabs.filter((tab) => tab.loaded), ...tabs.filter((tab) => !tab.loaded)].map((tab) => tab.source)
     const tracks = tabs.flatMap((tab) => (tab.track ? [tab.track] : []))
     const current = followed
     const isFollowed = (source: TrackSource) => current !== null && isSameTab(source, current)
@@ -158,12 +174,16 @@ export async function getNowPlaying(): Promise<NowPlaying> {
     if (playing) return { status: 'track', track: follow(playing) }
 
     // Nothing plays: stay on the followed tab while it is still open.
+    if (followedTab && !followedTab.loaded) return { status: 'unloaded', source: followedTab.source }
     if (followedTab) {
         const track = followedTab.track ? follow(followedTab.track) : followedTrack
         if (track) return { status: 'track', track }
     }
 
     if (tracks[0]) return { status: 'track', track: tracks[0] }
+
+    const unloaded = tabs.find((tab) => !tab.loaded)
+    if (unloaded) return { status: 'unloaded', source: unloaded.source }
 
     for (const result of results) {
         if ('error' in result) return { status: 'error', message: result.error }
@@ -177,17 +197,23 @@ export async function defaultTab(): Promise<TrackSource | null> {
     return followed ?? knownTabs[0] ?? null
 }
 
-/** Runs JavaScript in one specific tab and returns its result as text. */
-async function executeInTab(source: TrackSource, js: string): Promise<string> {
+/**
+ * Runs JavaScript in one specific tab and returns its result as text. A tab
+ * that doesn't answer in time (often one Brave hasn't loaded) fails with
+ * AppleScript's "AppleEvent timed out" error.
+ */
+async function executeInTab(source: TrackSource, js: string, timeoutSeconds = 3): Promise<string> {
     // The source can come back from the renderer, so it goes through a strict
     // check before it is spliced into a script.
     if (!BROWSERS.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
         throw new Error('Invalid tab')
     }
     return runAppleScript(`
-tell application ${asString(source.browser)}
-    execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
-end tell`)
+with timeout of ${timeoutSeconds} seconds
+    tell application ${asString(source.browser)}
+        execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
+    end tell
+end timeout`)
 }
 
 const ASYNC_POLL_MS = 80
@@ -235,17 +261,21 @@ export async function evaluateAsyncInTab(source: TrackSource, body: string, time
 let actionQueue: Promise<unknown> = Promise.resolve()
 
 const WAKE_TIMEOUT_MS = 3000
-const WAKE_POLL_MS = 100
+const LOAD_TAB_TIMEOUT_MS = 10_000
+const SHOW_POLL_MS = 100
 
 /**
- * Wakes a tab Chromium hasn't loaded media in yet (see IS_ASLEEP_JS) by
- * showing it in its window until the media loads, then switching back to
- * the tab that was in front. Measured at about 0.6s; once loaded, the tab
- * keeps working from the background.
+ * Shows a tab in its window until `isReady` holds, then switches back to the
+ * tab that was in front. Brave only loads restored tabs, and Chromium only
+ * loads media, once a tab has been shown; after that both keep working from
+ * the background.
  */
-async function wakeIfAsleep(source: TrackSource): Promise<void> {
-    if ((await executeInTab(source, `String(${IS_ASLEEP_JS})`)) !== 'true') return
-
+async function showTabUntil(
+    source: TrackSource,
+    isReady: () => Promise<boolean>,
+    timeoutMs: number,
+    failure: string,
+): Promise<void> {
     const tell = (body: string) =>
         runAppleScript(`
 tell application ${asString(source.browser)}
@@ -265,13 +295,12 @@ ${indexOf(String(source.tabId))}
     set active tab index of w to i
     return previousTabId as text`)
     try {
-        const deadline = Date.now() + WAKE_TIMEOUT_MS
+        const deadline = Date.now() + timeoutMs
         while (Date.now() < deadline) {
-            const readyState = Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`))
-            if (readyState >= 2) return
-            await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS))
+            if (await isReady()) return
+            await new Promise((resolve) => setTimeout(resolve, SHOW_POLL_MS))
         }
-        throw new Error("Brave hasn't loaded this YouTube Music tab yet. Open it once to start playback.")
+        throw new Error(failure)
     } finally {
         // Switch back only if the user hasn't moved to another tab meanwhile.
         // Brave reports tab ids as text, so they're compared as text.
@@ -285,6 +314,43 @@ ${indexOf(previousTabId)}
     }
 }
 
+/** Wakes a tab whose media Chromium is holding back (see IS_ASLEEP_JS); measured at about 0.6s. */
+async function wakeIfAsleep(source: TrackSource): Promise<void> {
+    if ((await executeInTab(source, `String(${IS_ASLEEP_JS})`)) !== 'true') return
+    await showTabUntil(
+        source,
+        async () => Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`)) >= 2,
+        WAKE_TIMEOUT_MS,
+        "Brave hasn't loaded this YouTube Music tab yet. Open it once to start playback.",
+    )
+}
+
+/** Gets Brave to load a tab it restored or discarded without loading. */
+export async function loadTab(source: TrackSource): Promise<void> {
+    await enqueue(() =>
+        showTabUntil(
+            source,
+            async () => {
+                try {
+                    // The tab answers once its page runs; the app element means YT Music is up.
+                    return (await executeInTab(source, `String(!!document.querySelector('ytmusic-app'))`, 1)) === 'true'
+                } catch {
+                    return false
+                }
+            },
+            LOAD_TAB_TIMEOUT_MS,
+            "Brave didn't load the YouTube Music tab. Open it once, then try again.",
+        ),
+    )
+}
+
+/** Runs actions one at a time so rapid presses reach the page in order. */
+function enqueue(action: () => Promise<void>): Promise<void> {
+    const run = actionQueue.then(action)
+    actionQueue = run.catch(() => {})
+    return run
+}
+
 /**
  * Runs a user action in one specific tab and starts following that tab.
  * Actions that start playback pass wake, so a tab Chromium hasn't loaded yet
@@ -296,12 +362,10 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
         followed = source
         followedTrack = null
     }
-    const run = actionQueue.then(async () => {
+    await enqueue(async () => {
         await executeInTab(source, js)
         if (wake) await wakeIfAsleep(source)
     })
-    actionQueue = run.catch(() => {})
-    await run
 }
 
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
