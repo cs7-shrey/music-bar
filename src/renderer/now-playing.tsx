@@ -259,7 +259,8 @@ export function NowPlaying({
     toggleLoop,
     loadingTab,
     pressed,
-}: ReturnType<typeof useNowPlaying>) {
+    artwork,
+}: ReturnType<typeof useNowPlaying> & { artwork: ArtworkState }) {
     if (state?.status !== 'track') {
         const [title, detail] =
             state?.status === 'error'
@@ -270,7 +271,7 @@ export function NowPlaying({
                       : ['Your tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
                   : ['Nothing playing', 'Open YouTube Music in Brave, Chrome or Helium']
         return (
-            <Hero stale={stale} artwork={null} eyebrow="YouTube Music">
+            <Hero stale={stale} artwork={NO_ARTWORK} eyebrow="YouTube Music">
                 <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{title}</h1>
                 <p className="line-clamp-2 text-sm font-medium text-subdued">{detail}</p>
             </Hero>
@@ -283,7 +284,7 @@ export function NowPlaying({
     return (
         <Hero
             stale={stale}
-            artwork={track.artworkUrl}
+            artwork={artwork}
             eyebrow={track.isPlaying ? 'Now playing' : 'Paused'}
             controls={
                 <div className="flex items-center gap-1.5">
@@ -340,7 +341,7 @@ function Hero({
     footer,
     children,
 }: {
-    artwork: string | null
+    artwork: ArtworkState
     eyebrow: string
     /** Dims the block while it shows state from before the launcher opened. */
     stale: boolean
@@ -351,7 +352,7 @@ function Hero({
     return (
         <section className={`flex flex-col gap-3 px-5 pt-4 pb-4 transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}>
             <div className="flex items-end gap-4">
-                <Artwork url={artwork} />
+                <Artwork artwork={artwork} />
                 <div className="flex min-w-0 flex-1 flex-col gap-1 pb-1">
                     <span className="text-xs font-bold text-white/80">{eyebrow}</span>
                     {children}
@@ -363,15 +364,14 @@ function Hero({
     )
 }
 
-function Artwork({ url }: { url: string | null }) {
-    // A failed load falls back to the placeholder instead of a broken image.
-    // Keyed by URL, so the next song gets a fresh attempt.
-    const [failedUrl, setFailedUrl] = useState<string | null>(null)
-    const shown = url !== failedUrl ? url : null
+function Artwork({ artwork }: { artwork: ArtworkState }) {
     const frame = 'size-[92px] shrink-0 rounded-md shadow-[0_8px_28px_rgba(0,0,0,0.55)]'
-    return shown ? (
-        <img src={shown} alt="" onError={() => setFailedUrl(url)} className={`${frame} object-cover`} />
-    ) : (
+    if (artwork.src) {
+        return <img src={artwork.src} alt="" crossOrigin="anonymous" className={`${frame} object-cover`} />
+    }
+    // A plain tile while the art loads; the note only when there's none to show.
+    if (artwork.status === 'loading') return <div className={`${frame} bg-highlight`} />
+    return (
         <div className={`${frame} flex items-center justify-center bg-gradient-to-br from-accent to-[#7a0019]`}>
             <Music2 className="size-9 text-white" strokeWidth={2.25} />
         </div>
@@ -476,63 +476,108 @@ function formatTime(seconds: number): string {
     return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
-// Deep red used when there's no artwork, or its color can't be read.
+// Deep red for the header when there's no artwork, or its color can't be read.
 const FALLBACK_COLOR = 'rgb(110, 14, 30)'
+// A failed or hung artwork load is retried after each delay, then given up.
+const ARTWORK_RETRY_DELAYS_MS = [1000, 3000, 6000]
+const ARTWORK_ATTEMPT_TIMEOUT_MS = 8000
+
+export interface ArtworkState {
+    /** The image to show once it has loaded; null while loading or failed. */
+    src: string | null
+    status: 'none' | 'loading' | 'loaded' | 'failed'
+    /** Header color: the artwork's dominant color, kept from the previous song until the new art loads. */
+    color: string
+}
+
+const NO_ARTWORK: ArtworkState = { src: null, status: 'none', color: FALLBACK_COLOR }
 
 /**
- * The artwork's dominant color, darkened enough for white text on top, for
- * the header's wash. Saturated pixels count for more, so a colorful cover on
- * a grey background still reads as its color. YouTube's image hosts allow
- * cross-origin reads, which the canvas needs.
+ * Loads the artwork once for both the image and the header color, retrying
+ * failed or hung loads; a single transient failure used to leave the
+ * placeholder up for the whole song. The image is loaded with CORS so its
+ * pixels can be read (YouTube's image hosts allow it), and the displayed
+ * <img> uses the same mode so it comes from the same cache entry.
  */
-export function useArtworkColor(url: string | null): string {
-    const [color, setColor] = useState(FALLBACK_COLOR)
+export function useArtwork(url: string | null): ArtworkState {
+    const [loaded, setLoaded] = useState<{ url: string; color: string } | null>(null)
+    const [failedUrl, setFailedUrl] = useState<string | null>(null)
+
     useEffect(() => {
-        if (!url) {
-            setColor(FALLBACK_COLOR)
-            return
-        }
+        if (!url) return
         let cancelled = false
-        const image = new Image()
-        image.crossOrigin = 'anonymous'
-        image.onload = () => {
-            if (cancelled) return
-            try {
-                const canvas = document.createElement('canvas')
-                canvas.width = canvas.height = 24
-                const context = canvas.getContext('2d', { willReadFrequently: true })!
-                context.drawImage(image, 0, 0, 24, 24)
-                const pixels = context.getImageData(0, 0, 24, 24).data
-                let r = 0
-                let g = 0
-                let b = 0
-                let total = 0
-                for (let i = 0; i < pixels.length; i += 4) {
-                    const max = Math.max(pixels[i], pixels[i + 1], pixels[i + 2])
-                    const min = Math.min(pixels[i], pixels[i + 1], pixels[i + 2])
-                    const weight = 0.1 + (max === 0 ? 0 : (max - min) / max) * (max / 255)
-                    r += pixels[i] * weight
-                    g += pixels[i + 1] * weight
-                    b += pixels[i + 2] * weight
-                    total += weight
-                }
-                // Scale so the brightest channel lands around 150: rich, but dark.
-                const scale = 150 / Math.max(r / total, g / total, b / total, 1)
-                const channel = (value: number) => Math.round(Math.min(255, (value / total) * scale))
-                setColor(`rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`)
-            } catch {
-                setColor(FALLBACK_COLOR)
+        let attempt = 0
+        let retryTimer: ReturnType<typeof setTimeout> | undefined
+        let image: HTMLImageElement | null = null
+
+        const load = () => {
+            const current = new Image()
+            image = current
+            current.crossOrigin = 'anonymous'
+            const timeout = setTimeout(() => fail(), ARTWORK_ATTEMPT_TIMEOUT_MS)
+            const fail = () => {
+                clearTimeout(timeout)
+                current.onload = current.onerror = null
+                current.src = ''
+                if (cancelled) return
+                const delay = ARTWORK_RETRY_DELAYS_MS[attempt++]
+                if (delay === undefined) setFailedUrl(url)
+                else retryTimer = setTimeout(load, delay)
             }
+            current.onload = () => {
+                clearTimeout(timeout)
+                if (!cancelled) setLoaded({ url, color: dominantColor(current) })
+            }
+            current.onerror = fail
+            current.src = url
         }
-        image.onerror = () => {
-            if (!cancelled) setColor(FALLBACK_COLOR)
-        }
-        image.src = url
+        load()
+
         return () => {
             cancelled = true
+            clearTimeout(retryTimer)
+            if (image) image.onload = image.onerror = null
         }
     }, [url])
-    return color
+
+    if (!url) return NO_ARTWORK
+    if (loaded?.url === url) return { src: url, status: 'loaded', color: loaded.color }
+    const color = loaded?.color ?? FALLBACK_COLOR
+    return { src: null, status: failedUrl === url ? 'failed' : 'loading', color }
+}
+
+/**
+ * The image's dominant color, darkened enough for white text on top.
+ * Saturated pixels count for more, so a colorful cover on a grey background
+ * still reads as its color.
+ */
+function dominantColor(image: HTMLImageElement): string {
+    try {
+        const canvas = document.createElement('canvas')
+        canvas.width = canvas.height = 24
+        const context = canvas.getContext('2d', { willReadFrequently: true })!
+        context.drawImage(image, 0, 0, 24, 24)
+        const pixels = context.getImageData(0, 0, 24, 24).data
+        let r = 0
+        let g = 0
+        let b = 0
+        let total = 0
+        for (let i = 0; i < pixels.length; i += 4) {
+            const max = Math.max(pixels[i], pixels[i + 1], pixels[i + 2])
+            const min = Math.min(pixels[i], pixels[i + 1], pixels[i + 2])
+            const weight = 0.1 + (max === 0 ? 0 : (max - min) / max) * (max / 255)
+            r += pixels[i] * weight
+            g += pixels[i + 1] * weight
+            b += pixels[i + 2] * weight
+            total += weight
+        }
+        // Scale so the brightest channel lands around 150: rich, but dark.
+        const scale = 150 / Math.max(r / total, g / total, b / total, 1)
+        const channel = (value: number) => Math.round(Math.min(255, (value / total) * scale))
+        return `rgb(${channel(r)}, ${channel(g)}, ${channel(b)})`
+    } catch {
+        return FALLBACK_COLOR
+    }
 }
 
 function describeError(message: string): string {

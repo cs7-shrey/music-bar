@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Command } from 'cmdk'
 import { Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { PlayerControl, SearchSong } from '../shared/ipc'
-import { NowPlaying, useArtworkColor, useNowPlaying } from './now-playing'
+import { NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
 interface PlaybackCommand {
@@ -38,7 +38,7 @@ export default function App() {
     const nowPlaying = useNowPlaying()
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
     const isLooping = track?.repeatMode === 'ONE'
-    const headerColor = useArtworkColor(track?.artworkUrl ?? null)
+    const artwork = useArtwork(track?.artworkUrl ?? null)
 
     const trimmed = query.trim()
     const live = useSuggestions(submitted === null ? query : '')
@@ -214,7 +214,7 @@ export default function App() {
             {/* The header takes its color from the artwork and fades into the page, as Spotify's now-playing view does. */}
             <header
                 className="relative shrink-0 transition-[background-color] duration-700"
-                style={{ backgroundColor: headerColor }}
+                style={{ backgroundColor: artwork.color }}
             >
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/0 via-base/55 to-base" />
                 <div className="relative">
@@ -234,7 +234,7 @@ export default function App() {
                             )}
                         </div>
                     </div>
-                    {trimmed ? <div className="h-2" /> : <NowPlaying {...nowPlaying} />}
+                    {trimmed ? <div className="h-2" /> : <NowPlaying {...nowPlaying} artwork={artwork} />}
                 </div>
             </header>
 
