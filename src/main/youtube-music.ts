@@ -77,6 +77,11 @@ type TabResult = { source: TrackSource; track: Track | null; loaded: boolean } |
 // How long one tab gets to answer before it counts as not loaded. Without a
 // limit, one unloaded tab hangs the whole read.
 const TAB_ANSWER_SECONDS = 1
+// A tab that didn't answer is skipped until this long after, so a read
+// doesn't spend a second on every inactive tab every time.
+const INACTIVE_RETRY_MS = 30_000
+const inactiveUntil = new Map<string, number>()
+const tabKey = (source: TrackSource) => `${source.browser}:${source.windowId}:${source.tabId}`
 
 // The tab Music Bar follows: the last one seen playing or controlled. Without
 // this, a pause or the gap between songs hands the card to whichever other
@@ -101,16 +106,24 @@ function follow(track: Track): Track {
 }
 
 async function readBrowser(browser: BrowserName): Promise<TabResult[]> {
+    const now = Date.now()
+    const skipIds = [...inactiveUntil]
+        .filter(([key, retryAt]) => key.startsWith(`${browser}:`) && retryAt > now)
+        .map(([key]) => asString(key.split(':').at(-1)!))
     // `tab` is a class name inside the browser's dictionary, so the separator
-    // is bound before entering the tell block.
+    // is bound before entering the tell block. The `whose` filter finds YT
+    // Music tabs in one request instead of asking each tab for its URL.
     const script = `
 set sep to character id 9
 set out to ""
+set skipIds to {${skipIds.join(', ')}}
 if application ${asString(browser)} is running then
     tell application ${asString(browser)}
         repeat with w in windows
-            repeat with t in tabs of w
-                if URL of t starts with ${asString(YT_MUSIC_URL)} then
+            repeat with t in (tabs of w whose URL starts with ${asString(YT_MUSIC_URL)})
+                if skipIds contains (id of t as text) then
+                    set out to out & "skipped" & sep & (id of w as text) & sep & (id of t as text) & linefeed
+                else
                     try
                         with timeout of ${TAB_ANSWER_SECONDS} seconds
                             set r to execute t javascript ${asString(READ_TRACK_JS)}
@@ -146,7 +159,12 @@ return out`
             if (kind === 'error') return { error: rest.join('\t') }
             const [windowId, tabId, json] = rest
             const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
-            if (kind === 'unloaded') return { source, track: null, loaded: false }
+            if (kind === 'skipped') return { source, track: null, loaded: false }
+            if (kind === 'unloaded') {
+                inactiveUntil.set(tabKey(source), Date.now() + INACTIVE_RETRY_MS)
+                return { source, track: null, loaded: false }
+            }
+            inactiveUntil.delete(tabKey(source))
             return { source, track: json ? { ...JSON.parse(json), source } : null, loaded: true }
         })
 }
@@ -189,6 +207,24 @@ export async function getNowPlaying(): Promise<NowPlaying> {
         if ('error' in result) return { status: 'error', message: result.error }
     }
     return { status: 'none' }
+}
+
+/**
+ * Reads only the followed tab: one quick call instead of a full scan, so the
+ * launcher shows current state the moment it opens and right after an action.
+ * Null when nothing is followed or the tab doesn't answer; the full read
+ * covers those cases.
+ */
+export async function getFollowedNowPlaying(): Promise<NowPlaying | null> {
+    const source = followed
+    if (!source || (inactiveUntil.get(tabKey(source)) ?? 0) > Date.now()) return null
+    try {
+        const json = await executeInTab(source, READ_TRACK_JS, TAB_ANSWER_SECONDS)
+        if (!json) return null
+        return { status: 'track', track: follow({ ...JSON.parse(json), source }) }
+    } catch {
+        return null
+    }
 }
 
 /** The tab to search and play in: the followed one, else any YT Music tab. */
@@ -342,6 +378,7 @@ export async function loadTab(source: TrackSource): Promise<void> {
             "Brave didn't load the YouTube Music tab. Open it once, then try again.",
         ),
     )
+    inactiveUntil.delete(tabKey(source))
 }
 
 /** Runs actions one at a time so rapid presses reach the page in order. */

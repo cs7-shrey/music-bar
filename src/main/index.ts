@@ -46,6 +46,7 @@ app.whenReady().then(() => {
 
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
     ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())
+    ipcMain.handle(IPC.nowPlayingGetFollowed, () => youtubeMusic.getFollowedNowPlaying())
     ipcMain.handle(IPC.nowPlayingControl, (_event, source: TrackSource, control: PlayerControl) =>
         youtubeMusic.control(source, control),
     )

@@ -7,6 +7,8 @@ export const IPC = {
     launcherHide: 'launcher:hide',
     /** renderer → main (invoke): read the current YouTube Music track. */
     nowPlayingGet: 'now-playing:get',
+    /** renderer → main (invoke): quick read of only the followed tab, or null. */
+    nowPlayingGetFollowed: 'now-playing:get-followed',
     /** renderer → main (invoke): press a player-bar control on a track's tab. */
     nowPlayingControl: 'now-playing:control',
     /** renderer → main (invoke): play or pause a track's tab. */
@@ -75,6 +77,7 @@ export interface MusicBarApi {
     onShown(listener: () => void): () => void
     onHidden(listener: () => void): () => void
     getNowPlaying(): Promise<NowPlaying>
+    getFollowedNowPlaying(): Promise<NowPlaying | null>
     control(source: TrackSource, control: PlayerControl): Promise<void>
     /** Plays or pauses; does nothing when the tab is already in that state. */
     setPlaying(source: TrackSource, playing: boolean): Promise<void>

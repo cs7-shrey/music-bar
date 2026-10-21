@@ -3,19 +3,28 @@ import { Music2, Pause, Play, Repeat1, SkipBack, SkipForward } from 'lucide-reac
 import type { NowPlaying as NowPlayingState, PlayerControl, SearchSong, Track } from '../shared/ipc'
 
 const POLL_MS = 2000
-// YouTube Music needs a moment to swap mediaSession metadata after a control.
-const SETTLE_MS = 400
-// Loading a new song takes longer than pressing a player button.
-const PLAY_SETTLE_MS = 1200
+// After an action, the acted-on tab is re-read this often until the change
+// shows (or the timeout passes), instead of waiting for the next poll.
+const SETTLE_POLL_MS = 250
+const SETTLE_TIMEOUT_MS = 4000
+// The card dims only if the first read after opening takes longer than this,
+// so a fast read doesn't flash it dim and back.
+const STALE_DIM_DELAY_MS = 300
 // Rapid presses of play/pause or loop only flip the UI; the page gets the
 // final state once the presses stop.
 const TOGGLE_DEBOUNCE_MS = 300
 
 type Toggle = 'play' | 'loop'
 
+const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.artist
+
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
     const [state, setState] = useState<NowPlayingState | null>(null)
+    // Dims the card when, shortly after opening, it still shows the state from
+    // when the launcher last closed, which may be out of date.
+    const [stale, setStale] = useState(false)
+    const awaitingFreshRead = useRef(true)
     // Bumped on every user action. A read that started before the latest
     // action carries stale state and would undo the optimistic update.
     const actionSeq = useRef(0)
@@ -25,11 +34,18 @@ export function useNowPlaying() {
     // toggles read their final target from it.
     const latestTrack = useRef<Track | null>(null)
 
-    const read = useCallback(async () => {
+    /** Runs a read and returns its result, or null when an action made it stale. */
+    const read = useCallback(async (fetch: () => Promise<NowPlayingState | null>) => {
         const seq = actionSeq.current
-        const next = await window.musicBar.getNowPlaying()
+        const next = await fetch()
         const isFresh = seq === actionSeq.current && actionsInFlight.current === 0
         return isFresh ? next : null
+    }, [])
+
+    const accept = useCallback((next: NowPlayingState) => {
+        awaitingFreshRead.current = false
+        setState(next)
+        setStale(false)
     }, [])
 
     useEffect(() => {
@@ -37,30 +53,43 @@ export function useNowPlaying() {
         // show cannot start a second loop.
         let generation = 0
         let timer: ReturnType<typeof setTimeout> | undefined
+        let dimTimer: ReturnType<typeof setTimeout> | undefined
 
         const poll = async (current: number) => {
-            const next = await read()
+            const next = await read(window.musicBar.getNowPlaying)
             if (current !== generation) return
-            if (next) setState(next)
+            if (next) accept(next)
             timer = setTimeout(() => void poll(current), POLL_MS)
         }
         const stop = () => {
             generation++
             clearTimeout(timer)
+            clearTimeout(dimTimer)
+            awaitingFreshRead.current = true
+            setStale(false)
         }
-        const start = () => {
+        const start = async () => {
             stop()
-            void poll(generation)
+            const current = generation
+            dimTimer = setTimeout(() => {
+                if (awaitingFreshRead.current) setStale(true)
+            }, STALE_DIM_DELAY_MS)
+            // The followed tab alone answers in about a tenth of a second; the
+            // full scan follows to catch other tabs and inactive ones.
+            const quick = await read(window.musicBar.getFollowedNowPlaying)
+            if (current !== generation) return
+            if (quick) accept(quick)
+            void poll(current)
         }
 
-        const offShown = window.musicBar.onShown(start)
+        const offShown = window.musicBar.onShown(() => void start())
         const offHidden = window.musicBar.onHidden(stop)
         return () => {
             stop()
             offShown()
             offHidden()
         }
-    }, [read])
+    }, [read, accept])
 
     const applyOptimistic = (optimistic: (track: Track) => Track) => {
         actionSeq.current++
@@ -69,8 +98,26 @@ export function useNowPlaying() {
         )
     }
 
-    /** Runs an action, then re-reads the real state once the page settles. */
-    const runAction = async (run: () => Promise<void>, settleMs: number) => {
+    /**
+     * Re-reads the followed tab (the one just acted on) every 250ms until
+     * `isDone` sees the change, then hands back to the regular poll. Gives up
+     * on a newer action, or after the timeout with one full read.
+     */
+    const settle = async (isDone: (track: Track) => boolean) => {
+        const seq = actionSeq.current
+        const deadline = Date.now() + SETTLE_TIMEOUT_MS
+        while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
+            if (seq !== actionSeq.current) return
+            const next = await read(window.musicBar.getFollowedNowPlaying)
+            if (next?.status === 'track' && isDone(next.track)) return accept(next)
+        }
+        const next = await read(window.musicBar.getNowPlaying)
+        if (next) accept(next)
+    }
+
+    /** Runs an action, then re-reads quickly until the page shows the change. */
+    const runAction = async (run: () => Promise<void>, isDone: (track: Track) => boolean) => {
         try {
             await run()
         } catch (error) {
@@ -78,17 +125,18 @@ export function useNowPlaying() {
         } finally {
             actionsInFlight.current--
         }
-        setTimeout(async () => {
-            const next = await read()
-            if (next) setState(next)
-        }, settleMs)
+        await settle(isDone)
     }
 
     /** Applies an optimistic update and runs the action right away. */
-    const act = async (optimistic: (track: Track) => Track, run: () => Promise<void>, settleMs = SETTLE_MS) => {
+    const act = async (
+        optimistic: (track: Track) => Track,
+        run: () => Promise<void>,
+        isDone: (track: Track) => boolean,
+    ) => {
         applyOptimistic(optimistic)
         actionsInFlight.current++
-        await runAction(run, settleMs)
+        await runAction(run, isDone)
     }
 
     /**
@@ -97,7 +145,12 @@ export function useNowPlaying() {
      * The pending toggle counts as in flight, which keeps polls from
      * overwriting the optimistic state meanwhile.
      */
-    const debouncedToggle = (key: Toggle, flip: (track: Track) => Track, send: (track: Track) => Promise<void>) => {
+    const debouncedToggle = (
+        key: Toggle,
+        flip: (track: Track) => Track,
+        send: (target: Track) => Promise<void>,
+        isDone: (target: Track, track: Track) => boolean,
+    ) => {
         if (!latestTrack.current) return
         applyOptimistic(flip)
         const pending = toggleTimers.current[key]
@@ -106,7 +159,14 @@ export function useNowPlaying() {
         toggleTimers.current[key] = setTimeout(() => {
             delete toggleTimers.current[key]
             const target = latestTrack.current
-            void runAction(() => (target ? send(target) : Promise.resolve()), SETTLE_MS)
+            if (!target) {
+                actionsInFlight.current--
+                return
+            }
+            void runAction(
+                () => send(target),
+                (track) => isDone(target, track),
+            )
         }, TOGGLE_DEBOUNCE_MS)
     }
 
@@ -115,9 +175,11 @@ export function useNowPlaying() {
 
     const control = (action: PlayerControl) => {
         if (!track) return
+        const before = track
         void act(
             (current) => current,
-            () => window.musicBar.control(track.source, action),
+            () => window.musicBar.control(before.source, action),
+            (next) => !sameSong(next, before),
         )
     }
 
@@ -126,6 +188,7 @@ export function useNowPlaying() {
             'play',
             (current) => ({ ...current, isPlaying: !current.isPlaying }),
             (target) => window.musicBar.setPlaying(target.source, target.isPlaying),
+            (target, next) => next.isPlaying === target.isPlaying,
         )
 
     // Turning the loop off restores the previous mode, which only the page
@@ -135,10 +198,12 @@ export function useNowPlaying() {
             'loop',
             (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
             (target) => window.musicBar.setLoop(target.source, target.repeatMode === 'ONE'),
+            (target, next) => (next.repeatMode === 'ONE') === (target.repeatMode === 'ONE'),
         )
 
-    const playNow = (song: SearchSong) =>
-        act(
+    const playNow = (song: SearchSong) => {
+        const before = track
+        return act(
             (current) => ({
                 ...current,
                 title: song.title,
@@ -148,8 +213,9 @@ export function useNowPlaying() {
                 isPlaying: true,
             }),
             () => window.musicBar.playNow(song),
-            PLAY_SETTLE_MS,
+            (next) => !before || !sameSong(next, before),
         )
+    }
 
     const [loadingTab, setLoadingTab] = useState(false)
 
@@ -160,14 +226,24 @@ export function useNowPlaying() {
         setLoadingTab(true)
         actionSeq.current++
         actionsInFlight.current++
-        await runAction(() => window.musicBar.loadTab(source), SETTLE_MS)
+        await runAction(
+            () => window.musicBar.loadTab(source),
+            () => true,
+        )
         setLoadingTab(false)
     }
 
-    return { state, control, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
+    return { state, stale, control, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
 }
 
-export function NowPlaying({ state, control, togglePlay, toggleLoop, loadingTab }: ReturnType<typeof useNowPlaying>) {
+export function NowPlaying({
+    state,
+    stale,
+    control,
+    togglePlay,
+    toggleLoop,
+    loadingTab,
+}: ReturnType<typeof useNowPlaying>) {
     if (state?.status !== 'track') {
         const [title, detail] =
             state?.status === 'error'
@@ -178,7 +254,7 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop, loadingTab 
                       : ['YouTube Music tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
                   : ['Nothing playing', 'Open YouTube Music in Brave, Chrome or Helium']
         return (
-            <Card artwork={null}>
+            <Card artwork={null} stale={stale}>
                 <div className="min-w-0 flex-1">
                     <div className="truncate text-[15px] font-semibold">{title}</div>
                     <div className="line-clamp-2 text-[13px] text-neutral-400">{detail}</div>
@@ -189,7 +265,7 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop, loadingTab 
 
     const { track } = state
     return (
-        <Card artwork={track.artworkUrl}>
+        <Card artwork={track.artworkUrl} stale={stale}>
             <div className="min-w-0 flex-1">
                 <div className="truncate text-[15px] font-semibold">{track.title}</div>
                 <div className="truncate text-[13px] text-neutral-400">{track.artist}</div>
@@ -225,7 +301,16 @@ export function NowPlaying({ state, control, togglePlay, toggleLoop, loadingTab 
     )
 }
 
-function Card({ artwork: artworkUrl, children }: { artwork: string | null; children: ReactNode }) {
+function Card({
+    artwork: artworkUrl,
+    stale,
+    children,
+}: {
+    artwork: string | null
+    /** Dims the card while it shows state from before the launcher opened. */
+    stale: boolean
+    children: ReactNode
+}) {
     // A failed load falls back to the placeholder instead of a broken image.
     // Keyed by URL, so the next song gets a fresh attempt.
     const [failedUrl, setFailedUrl] = useState<string | null>(null)
@@ -233,7 +318,9 @@ function Card({ artwork: artworkUrl, children }: { artwork: string | null; child
     const onError = () => setFailedUrl(artworkUrl)
 
     return (
-        <div className="relative mx-2 mt-2 shrink-0 overflow-hidden rounded-xl bg-white/[0.04]">
+        <div
+            className={`relative mx-2 mt-2 shrink-0 overflow-hidden rounded-xl bg-white/[0.04] transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}
+        >
             {artwork && (
                 <img
                     src={artwork}
