@@ -24,6 +24,9 @@ const IS_ASLEEP_JS = `((video) => {
 })(document.querySelector('video'))`
 
 // Returns '' when the tab has no track loaded, else the track as JSON.
+// Position and duration come from the player bar's progress slider, not the
+// <video>: YouTube Music plays songs back to back through one media stream,
+// so the video's currentTime keeps counting across songs.
 // isPlaying needs more than "not paused": a restored background tab can be
 // told to play while Chromium holds off loading media until it is opened,
 // leaving the video unpaused with no data (readyState 0). readyState 2 means
@@ -32,6 +35,7 @@ const READ_TRACK_JS = `(() => {
     const m = navigator.mediaSession.metadata;
     if (!m || !m.title) return '';
     const video = document.querySelector('video');
+    const slider = document.querySelector('ytmusic-player-bar #progress-bar');
     const art = [...m.artwork].sort((a, b) => parseInt(b.sizes) - parseInt(a.sizes))[0];
     return JSON.stringify({
         title: m.title,
@@ -41,8 +45,8 @@ const READ_TRACK_JS = `(() => {
         isPlaying: !!video && !video.paused && !video.ended && video.readyState >= 2,
         repeatMode: document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode') || 'NONE',
         isAsleep: ${IS_ASLEEP_JS},
-        position: video ? video.currentTime : 0,
-        duration: video && Number.isFinite(video.duration) ? video.duration : null,
+        position: Number(slider?.getAttribute('aria-valuenow')) || 0,
+        duration: Number(slider?.getAttribute('aria-valuemax')) || null,
         readAt: Date.now(),
     });
 })()`

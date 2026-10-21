@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Music2, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
+import { Music2, Pause, Play } from 'lucide-react'
 import type { NowPlaying as NowPlayingState, PlayerControl, RepeatMode, SearchSong, Track } from '../shared/ipc'
 
 const POLL_MS = 2000
@@ -13,6 +13,8 @@ const STALE_DIM_DELAY_MS = 300
 // Rapid presses of play/pause or loop only flip the UI; the page gets the
 // final state once the presses stop.
 const TOGGLE_DEBOUNCE_MS = 300
+// How long a skip button shows as pressed, so ⌘H/⌘L look like a click.
+const PRESS_FLASH_MS = 160
 
 type Toggle = 'play' | 'loop'
 
@@ -56,10 +58,14 @@ export function useNowPlaying() {
         let dimTimer: ReturnType<typeof setTimeout> | undefined
 
         const poll = async (current: number) => {
-            const next = await read(window.musicBar.getNowPlaying)
-            if (current !== generation) return
-            if (next) accept(next)
-            timer = setTimeout(() => void poll(current), POLL_MS)
+            try {
+                const next = await read(window.musicBar.getNowPlaying)
+                if (current === generation && next) accept(next)
+            } catch (error) {
+                // A failed read must not end the loop, or the card freezes until the launcher reopens.
+                console.error('[music-bar] now-playing read failed', error)
+            }
+            if (current === generation) timer = setTimeout(() => void poll(current), POLL_MS)
         }
         const stop = () => {
             generation++
@@ -84,6 +90,9 @@ export function useNowPlaying() {
 
         const offShown = window.musicBar.onShown(() => void start())
         const offHidden = window.musicBar.onHidden(stop)
+        // A reload while the launcher is open (e.g. a hot update in dev) would
+        // otherwise wait for the next show before polling again.
+        if (document.visibilityState === 'visible') void start()
         return () => {
             stop()
             offShown()
@@ -173,8 +182,14 @@ export function useNowPlaying() {
     const track = state?.status === 'track' ? state.track : null
     latestTrack.current = track
 
+    const [pressed, setPressed] = useState<PlayerControl | null>(null)
+    const pressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
     const control = (action: PlayerControl) => {
         if (!track) return
+        setPressed(action)
+        clearTimeout(pressTimer.current)
+        pressTimer.current = setTimeout(() => setPressed(null), PRESS_FLASH_MS)
         const before = track
         void act(
             (current) => current,
@@ -233,7 +248,7 @@ export function useNowPlaying() {
         setLoadingTab(false)
     }
 
-    return { state, stale, control, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
+    return { state, stale, control, pressed, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
 }
 
 export function NowPlaying({
@@ -243,6 +258,7 @@ export function NowPlaying({
     togglePlay,
     toggleLoop,
     loadingTab,
+    pressed,
 }: ReturnType<typeof useNowPlaying>) {
     if (state?.status !== 'track') {
         const [title, detail] =
@@ -278,8 +294,8 @@ export function NowPlaying({
                     >
                         <RepeatIcon mode={track.repeatMode} />
                     </IconButton>
-                    <IconButton label="Previous (⌘H)" onClick={() => void control('previous')}>
-                        <SkipBack className="size-5" fill="currentColor" strokeWidth={0} />
+                    <IconButton label="Previous (⌘H)" onClick={() => control('previous')} pressed={pressed === 'previous'} active>
+                        <SkipIcon direction="previous" />
                     </IconButton>
                     <button
                         type="button"
@@ -288,7 +304,7 @@ export function NowPlaying({
                         tabIndex={-1}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={togglePlay}
-                        className="flex size-12 items-center justify-center rounded-full bg-accent text-white transition hover:scale-105 hover:bg-accent-bright active:scale-95"
+                        className="glass flex size-12 items-center justify-center rounded-full text-white transition hover:scale-105 active:scale-95"
                     >
                         {track.isPlaying ? (
                             <Pause className="size-5" fill="currentColor" strokeWidth={0} />
@@ -296,8 +312,8 @@ export function NowPlaying({
                             <Play className="ml-0.5 size-5" fill="currentColor" strokeWidth={0} />
                         )}
                     </button>
-                    <IconButton label="Next (⌘L)" onClick={() => void control('next')}>
-                        <SkipForward className="size-5" fill="currentColor" strokeWidth={0} />
+                    <IconButton label="Next (⌘L)" onClick={() => control('next')} pressed={pressed === 'next'} active>
+                        <SkipIcon direction="next" />
                     </IconButton>
                 </div>
             }
@@ -366,11 +382,14 @@ function IconButton({
     label,
     onClick,
     active,
+    pressed,
     children,
 }: {
     label: string
     onClick: () => void
     active?: boolean
+    /** Shows the button as pressed, for a keyboard shortcut that triggers it. */
+    pressed?: boolean
     children: ReactNode
 }) {
     return (
@@ -384,10 +403,19 @@ function IconButton({
             onClick={onClick}
             // Active is white rather than red: the header takes the artwork's
             // color, and red on a red cover disappears.
-            className={`flex size-9 items-center justify-center rounded-full transition hover:bg-white/10 active:scale-95 ${active ? 'text-white' : 'text-subdued hover:text-white'}`}
+            className={`flex size-9 items-center justify-center rounded-full transition duration-100 hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}
         >
             {children}
         </button>
+    )
+}
+
+/** YouTube's skip icons: Material Design's skip_previous / skip_next, solid with sharp corners. */
+function SkipIcon({ direction }: { direction: PlayerControl }) {
+    return (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="size-6" aria-hidden="true">
+            <path d={direction === 'previous' ? 'M6 6h2v12H6zm3.5 6 8.5 6V6z' : 'M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z'} />
+        </svg>
     )
 }
 

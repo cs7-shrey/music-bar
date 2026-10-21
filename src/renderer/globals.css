@@ -13,8 +13,8 @@
     --color-highlight: #2a2a2a;
     --color-subdued: #b3b3b3;
     --color-faint: #7a7a7a;
-    --color-accent: #ff0033;
-    --color-accent-bright: #ff3355;
+    --color-accent: #d6002c;
+    --color-accent-bright: #e5163f;
 }
 
 * {
@@ -46,4 +46,15 @@ body {
 
 [cmdk-group]:first-child [cmdk-group-heading] {
     @apply pt-2;
+}
+
+/* Frosted glass, for the play/pause button: translucent white over a blur of the header. */
+.glass {
+    background: rgb(255 255 255 / 0.14);
+    backdrop-filter: blur(12px) saturate(140%);
+    border: 1px solid rgb(255 255 255 / 0.18);
+}
+
+.glass:hover {
+    background: rgb(255 255 255 / 0.2);
 }
