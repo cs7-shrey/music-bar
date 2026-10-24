@@ -64,6 +64,8 @@ export default function App() {
     const nowPlaying = useNowPlaying()
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
     const isLooping = track?.repeatMode === 'ONE'
+    // Song-only commands (loop, radio) are unavailable while an ad plays.
+    const isAd = track?.isAd ?? false
     const artwork = useArtwork(track?.artworkUrl ?? null)
 
     const trimmed = query.trim()
@@ -201,11 +203,17 @@ export default function App() {
                     value={LOOP_COMMAND}
                     icon={<Repeat1 strokeWidth={2.25} />}
                     title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
-                    subtitle={track ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”` : 'Nothing is playing'}
+                    subtitle={
+                        isAd
+                            ? 'Not available during ads'
+                            : track
+                              ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
+                              : 'Nothing is playing'
+                    }
                     shortcut="⌘O"
                     // Dimmed rather than skipped: a missing row would push the
                     // selection onto a placeholder while the track loads.
-                    muted={!track}
+                    muted={!track || isAd}
                     onSelect={nowPlaying.toggleLoop}
                 />
             )}
@@ -215,8 +223,9 @@ export default function App() {
                     value={command.title}
                     icon={command.icon}
                     title={command.title}
-                    subtitle={command.subtitle}
+                    subtitle={isAd ? 'Not available during ads' : command.subtitle}
                     badge="Soon"
+                    muted={isAd}
                 />
             ))}
         </Command.Group>

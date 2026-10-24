@@ -56,6 +56,8 @@ export interface Track {
     duration: number | null
     /** When position was read (ms since epoch), so the UI can advance it between reads. */
     readAt: number
+    /** An ad is playing; title and artist are the ad's, and position isn't tracked. */
+    isAd: boolean
     source: TrackSource
 }
 

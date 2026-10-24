@@ -24,6 +24,8 @@ const IS_ASLEEP_JS = `((video) => {
 })(document.querySelector('video'))`
 
 // Returns '' when the tab has no track loaded, else the track as JSON.
+// During an ad, YouTube's player gets the ad-showing class and the song info
+// is the ad's; the player bar's play button and slider stop working.
 // Position and duration come from the player bar's progress slider, not the
 // <video>: YouTube Music plays songs back to back through one media stream,
 // so the video's currentTime keeps counting across songs.
@@ -48,6 +50,7 @@ const READ_TRACK_JS = `(() => {
         position: Number(slider?.getAttribute('aria-valuenow')) || 0,
         duration: Number(slider?.getAttribute('aria-valuemax')) || null,
         readAt: Date.now(),
+        isAd: !!document.querySelector('#movie_player.ad-showing'),
     });
 })()`
 
@@ -457,12 +460,19 @@ export async function control(source: TrackSource, action: PlayerControl): Promi
 export async function setPlaying(source: TrackSource, playing: boolean): Promise<void> {
     if (typeof playing !== 'boolean') throw new Error('Invalid play request')
     // Sets a state rather than toggling, so a repeated or late request can't
-    // flip playback the wrong way.
+    // flip playback the wrong way. During an ad the player bar's button does
+    // nothing, so the video is played or paused directly; YouTube's player
+    // follows it. (Clicking an ad's video could open the advertiser's site.)
     await runInTab(
         source,
         `(() => {
             const video = document.querySelector('video');
-            if (video && video.paused === ${playing}) document.querySelector('ytmusic-player-bar #play-pause-button')?.click();
+            if (!video || video.paused !== ${playing}) return;
+            if (document.querySelector('#movie_player.ad-showing')) {
+                if (${playing}) video.play(); else video.pause();
+                return;
+            }
+            document.querySelector('ytmusic-player-bar #play-pause-button')?.click();
         })()`,
         { wake: playing },
     )

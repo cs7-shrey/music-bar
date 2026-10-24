@@ -219,7 +219,9 @@ export function useNowPlaying() {
 
     // Turning the loop off restores the previous mode, which only the page
     // knows; 'NONE' is a placeholder until the re-read lands.
+    // Looping an ad makes no sense, and the repeat button belongs to the song.
     const toggleLoop = () =>
+        !latestTrack.current?.isAd &&
         debouncedToggle(
             'loop',
             (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
@@ -296,13 +298,18 @@ export function NowPlaying({
         <Hero
             stale={stale}
             artwork={artwork}
-            eyebrow={track.isPlaying ? 'Now playing' : 'Paused'}
+            eyebrow={track.isAd ? (track.isPlaying ? 'Ad playing' : 'Ad paused') : track.isPlaying ? 'Now playing' : 'Paused'}
             controls={
                 <div className="flex items-center gap-1.5">
                     <IconButton
-                        label={`${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`}
+                        label={
+                            track.isAd
+                                ? 'Not available during ads'
+                                : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`
+                        }
                         onClick={toggleLoop}
                         active={track.repeatMode !== 'NONE'}
+                        disabled={track.isAd}
                     >
                         <RepeatIcon mode={track.repeatMode} />
                     </IconButton>
@@ -329,7 +336,8 @@ export function NowPlaying({
                     </IconButton>
                 </div>
             }
-            footer={<Progress track={track} />}
+            // Ads have no usable position in the player bar, so their row is a placeholder.
+            footer={track.isAd ? <AdProgress /> : <Progress track={track} />}
         >
             <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{track.title}</h1>
             <p className="truncate text-sm font-semibold text-subdued">{track.artist}</p>
@@ -394,6 +402,7 @@ function IconButton({
     onClick,
     active,
     pressed,
+    disabled,
     children,
 }: {
     label: string
@@ -401,6 +410,7 @@ function IconButton({
     active?: boolean
     /** Shows the button as pressed, for a keyboard shortcut that triggers it. */
     pressed?: boolean
+    disabled?: boolean
     children: ReactNode
 }) {
     return (
@@ -414,7 +424,8 @@ function IconButton({
             onClick={onClick}
             // Active is white rather than red: the header takes the artwork's
             // color, and red on a red cover disappears.
-            className={`flex size-9 items-center justify-center rounded-full transition duration-100 hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}
+            disabled={disabled}
+            className={`flex size-9 items-center justify-center rounded-full transition duration-100 ${disabled ? 'cursor-default text-subdued opacity-40' : `hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}`}
         >
             {children}
         </button>
@@ -454,6 +465,17 @@ function RepeatIcon({ mode }: { mode: RepeatMode }) {
             {mode === 'ALL' && <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />}
             {mode === 'ONE' && <path d="M11 10h1v4" />}
         </svg>
+    )
+}
+
+/** The progress row during an ad: an empty bar and zeroed times. */
+function AdProgress() {
+    return (
+        <div className="flex items-center gap-2.5 text-[11px] font-medium text-subdued tabular-nums">
+            <span className="w-9 text-right">0:00</span>
+            <div className="h-1 flex-1 rounded-full bg-white/20" />
+            <span className="w-9">0:00</span>
+        </div>
     )
 }
 
