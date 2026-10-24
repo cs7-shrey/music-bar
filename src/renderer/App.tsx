@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { Globe, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { ExternalLink, Globe, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
-import { NowPlaying, useArtwork, useNowPlaying } from './now-playing'
+import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
 const PLAY_PAUSE_COMMAND = 'Play or Pause'
@@ -10,8 +10,6 @@ const LOOP_COMMAND = 'Loop Current Song'
 const RADIO_COMMAND = 'Start Radio'
 
 const NOTICE_MS = 2500
-
-const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
 
 const BROWSER_STATES: Record<BrowserState, { label: string; problem: string | null }> = {
     connected: { label: 'Connected', problem: null },
@@ -40,9 +38,6 @@ function describeBrowser({ state, message }: BrowserStatus): string {
 // ⌘R is free: the app menu has no Reload item (see index.ts).
 const SHORTCUTS: Record<string, 'loop' | 'radio' | PlayerControl> = { o: 'loop', r: 'radio', h: 'previous', l: 'next' }
 
-const matches = (query: string, ...texts: string[]) =>
-    texts.some((text) => text.toLowerCase().includes(query.toLowerCase()))
-
 export default function App() {
     const [query, setQuery] = useState('')
     // The query whose full search is on screen; null while typing.
@@ -59,7 +54,8 @@ export default function App() {
     const artwork = useArtwork(track?.artworkUrl ?? null)
 
     const trimmed = query.trim()
-    const live = useSuggestions(submitted === null ? query : '')
+    // No suggestions without a YouTube Music tab to ask; the rows offer to open one.
+    const live = useSuggestions(submitted === null && !nowPlaying.needsTab ? query : '')
     const full = useFullSearch(submitted ?? '')
 
     const reset = () => {
@@ -162,92 +158,110 @@ export default function App() {
         else window.musicBar.hide()
     }
 
-    const showPlayPause = !trimmed || matches(trimmed, 'play', 'pause', 'resume')
-    const showLoop = !trimmed || matches(trimmed, LOOP_COMMAND, 'repeat', 'stop looping')
-    const showRadio = !trimmed || matches(trimmed, RADIO_COMMAND, 'mix')
-    const commands = (showPlayPause || showLoop || showRadio) && (
+    // With no YouTube Music tab anywhere, the first row opens one instead of
+    // playing: one row per browser that's ready (last used first), the first
+    // keeping the Play row's value so ↵ right after opening picks it.
+    const openRows = nowPlaying.openable.map((browser, index) => (
+        <CommandRow
+            key={browser}
+            value={index === 0 ? PLAY_PAUSE_COMMAND : `open:${browser}`}
+            icon={<ExternalLink strokeWidth={2.25} />}
+            title="Open YouTube Music"
+            subtitle={
+                nowPlaying.openingIn === browser
+                    ? `Opening in ${BROWSER_NAMES[browser]}…`
+                    : `In ${BROWSER_NAMES[browser]}, in the background`
+            }
+            muted={nowPlaying.openingIn !== null}
+            onSelect={() => void nowPlaying.openYouTubeMusic(browser)}
+        />
+    ))
+
+    const playRow =
+        nowPlaying.state?.status === 'unloaded' ? (
+            // Same row and value, so ↵ right after opening loads the tab.
+            <CommandRow
+                value={PLAY_PAUSE_COMMAND}
+                icon={<Play fill="currentColor" strokeWidth={0} />}
+                title="Load YouTube Music"
+                subtitle="Opens the inactive tab for a moment"
+                muted={nowPlaying.loadingTab}
+                onSelect={() => void nowPlaying.loadTab()}
+            />
+        ) : nowPlaying.needsTab && openRows.length > 0 ? (
+            openRows
+        ) : (
+            <CommandRow
+                // Stable value so the selection does not jump when the title flips.
+                value={PLAY_PAUSE_COMMAND}
+                icon={
+                    track?.isPlaying ? (
+                        <Pause fill="currentColor" strokeWidth={0} />
+                    ) : (
+                        <Play fill="currentColor" strokeWidth={0} />
+                    )
+                }
+                title={track?.isPlaying ? 'Pause' : 'Play'}
+                subtitle={
+                    !track
+                        ? 'Nothing is playing'
+                        : track.isAsleep && !track.isPlaying
+                          ? `“${track.title}” · opens the tab for a moment to load it`
+                          : `“${track.title}”`
+                }
+                muted={!track}
+                onSelect={nowPlaying.togglePlay}
+            />
+        )
+
+    // Commands and browser status live on the empty screen only; once you
+    // type, the list is search results and nothing else.
+    const commands = (
         <Command.Group heading="Playback">
-            {showPlayPause &&
-                (nowPlaying.state?.status === 'unloaded' ? (
-                    // Same row and value, so ↵ right after opening loads the tab.
-                    <CommandRow
-                        value={PLAY_PAUSE_COMMAND}
-                        icon={<Play fill="currentColor" strokeWidth={0} />}
-                        title="Load YouTube Music"
-                        subtitle="Opens the inactive tab for a moment"
-                        muted={nowPlaying.loadingTab}
-                        onSelect={() => void nowPlaying.loadTab()}
-                    />
-                ) : (
-                    <CommandRow
-                        // Stable value so the selection does not jump when the title flips.
-                        value={PLAY_PAUSE_COMMAND}
-                        icon={
-                            track?.isPlaying ? (
-                                <Pause fill="currentColor" strokeWidth={0} />
-                            ) : (
-                                <Play fill="currentColor" strokeWidth={0} />
-                            )
-                        }
-                        title={track?.isPlaying ? 'Pause' : 'Play'}
-                        subtitle={
-                            !track
-                                ? 'Nothing is playing'
-                                : track.isAsleep && !track.isPlaying
-                                  ? `“${track.title}” · opens the tab for a moment to load it`
-                                  : `“${track.title}”`
-                        }
-                        muted={!track}
-                        onSelect={nowPlaying.togglePlay}
-                    />
-                ))}
-            {showLoop && (
-                <CommandRow
-                    // Stable value so the selection does not jump when the title flips.
-                    value={LOOP_COMMAND}
-                    icon={<Repeat1 strokeWidth={2.25} />}
-                    title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
-                    subtitle={
-                        isAd
-                            ? 'Not available during ads'
-                            : track
-                              ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
-                              : 'Nothing is playing'
-                    }
-                    shortcut="⌘O"
-                    // Dimmed rather than skipped: a missing row would push the
-                    // selection onto a placeholder while the track loads.
-                    muted={!track || isAd}
-                    onSelect={nowPlaying.toggleLoop}
-                />
-            )}
-            {showRadio && (
-                <CommandRow
-                    value={RADIO_COMMAND}
-                    icon={<Radio strokeWidth={2.25} />}
-                    title="Start Radio"
-                    subtitle={
-                        isAd
-                            ? 'Not available during ads'
-                            : track
-                              ? `A mix based on “${track.title}”`
-                              : 'Nothing is playing'
-                    }
-                    shortcut="⌘R"
-                    muted={!track || isAd}
-                    onSelect={startRadio}
-                />
-            )}
+            {playRow}
+            <CommandRow
+                // Stable value so the selection does not jump when the title flips.
+                value={LOOP_COMMAND}
+                icon={<Repeat1 strokeWidth={2.25} />}
+                title={isLooping ? 'Stop Looping' : 'Loop Current Song'}
+                subtitle={
+                    isAd
+                        ? 'Not available during ads'
+                        : track
+                          ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
+                          : 'Nothing is playing'
+                }
+                shortcut="⌘O"
+                // Dimmed rather than skipped: a missing row would push the
+                // selection onto a placeholder while the track loads.
+                muted={!track || isAd}
+                onSelect={nowPlaying.toggleLoop}
+            />
+            <CommandRow
+                value={RADIO_COMMAND}
+                icon={<Radio strokeWidth={2.25} />}
+                title="Start Radio"
+                subtitle={
+                    isAd ? 'Not available during ads' : track ? `A mix based on “${track.title}”` : 'Nothing is playing'
+                }
+                shortcut="⌘R"
+                muted={!track || isAd}
+                onSelect={startRadio}
+            />
         </Command.Group>
     )
 
-    // Open browsers that can't be used. Listed when there are any, or when
-    // the search mentions browsers; the footer flags the first one.
+    // Searching needs a YouTube Music tab; without one, the search rows offer
+    // to open it and run the search once it's up.
+    const openAndSearch = async (browser: BrowserName, searchQuery: string) => {
+        await nowPlaying.openYouTubeMusic(browser)
+        submit(searchQuery)
+    }
+
+    // Open browsers that can't be used. When there are any, the empty screen
+    // lists every open browser's status and the footer flags the first one.
     const problems = nowPlaying.browsers.filter((browser) => BROWSER_STATES[browser.state].problem)
-    const showBrowsers = trimmed
-        ? matches(trimmed, 'browsers', 'brave', 'chrome', 'helium')
-        : problems.length > 0
-    const browserRows = showBrowsers && nowPlaying.browsers.length > 0 && (
+    const browserRows = problems.length > 0 && (
         <Command.Group heading="Browsers">
             {nowPlaying.browsers.map((status) => (
                 <CommandRow
@@ -311,12 +325,39 @@ export default function App() {
 
                 {trimmed && submitted === null && (
                     <>
-                        <Command.Group heading="Search">
-                            <SearchRow query={trimmed} label={`Search “${trimmed}”`} onSelect={() => submit(trimmed)} />
-                            {suggestions.map((text) => (
-                                <SearchRow key={text} query={text} label={text} onSelect={() => submit(text)} />
-                            ))}
-                        </Command.Group>
+                        {nowPlaying.needsTab ? (
+                            nowPlaying.openable.length > 0 ? (
+                                <Command.Group heading="Search">
+                                    {nowPlaying.openable.map((browser, index) => (
+                                        <CommandRow
+                                            key={browser}
+                                            // The first takes the search row's value, so ↵ picks it.
+                                            value={index === 0 ? searchValue(trimmed) : `open-search:${browser}`}
+                                            icon={<ExternalLink strokeWidth={2.25} />}
+                                            title={`Open YouTube Music in ${BROWSER_NAMES[browser]}`}
+                                            subtitle={
+                                                nowPlaying.openingIn === browser ? 'Opening…' : `and search “${trimmed}”`
+                                            }
+                                            muted={nowPlaying.openingIn !== null}
+                                            onSelect={() => void openAndSearch(browser, trimmed)}
+                                        />
+                                    ))}
+                                </Command.Group>
+                            ) : (
+                                <ListNote>
+                                    {nowPlaying.browsers.length === 0
+                                        ? 'Open Brave, Chrome or Helium to search'
+                                        : 'Set up a browser to search: View → Developer → Allow JavaScript from Apple Events'}
+                                </ListNote>
+                            )
+                        ) : (
+                            <Command.Group heading="Search">
+                                <SearchRow query={trimmed} label={`Search “${trimmed}”`} onSelect={() => submit(trimmed)} />
+                                {suggestions.map((text) => (
+                                    <SearchRow key={text} query={text} label={text} onSelect={() => submit(text)} />
+                                ))}
+                            </Command.Group>
+                        )}
                         {live.results?.status === 'error' && <ListNote>{live.results.message}</ListNote>}
                         {liveResults && liveResults.songs.length > 0 && (
                             <Command.Group heading="Songs">
@@ -325,8 +366,6 @@ export default function App() {
                                 ))}
                             </Command.Group>
                         )}
-                        {commands}
-                        {browserRows}
                     </>
                 )}
 

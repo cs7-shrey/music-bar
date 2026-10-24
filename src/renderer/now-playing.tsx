@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Music2, Pause, Play } from 'lucide-react'
 import type {
+    BrowserName,
     BrowserStatus,
     NowPlaying as NowPlayingState,
     PlayerControl,
@@ -28,6 +29,8 @@ type Toggle = 'play' | 'loop'
 
 const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.artist
 
+export const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
+
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
     const [state, setState] = useState<NowPlayingState | null>(null)
@@ -53,7 +56,8 @@ export function useNowPlaying() {
     }, [])
 
     // Every open browser and whether it can be used; only full reads carry it.
-    const [browsers, setBrowsers] = useState<BrowserStatus[]>([])
+    // Null until the first full read reports them.
+    const [browsers, setBrowsers] = useState<BrowserStatus[] | null>(null)
 
     const accept = useCallback((next: NowPlayingState) => {
         awaitingFreshRead.current = false
@@ -303,10 +307,38 @@ export function useNowPlaying() {
         setLoadingTab(false)
     }
 
+    // No YouTube Music tab anywhere: browsers ready to open one (last used
+    // first), and the one being opened right now.
+    const needsTab = browsers !== null && state?.status === 'none' && !browsers.some((b) => b.state === 'connected')
+    const openable = (browsers ?? []).filter((b) => b.state === 'no-tab').map((b) => b.browser)
+    const [openingIn, setOpeningIn] = useState<BrowserName | null>(null)
+
+    /** Opens YouTube Music in a background tab; resolves once it's usable. Ignored while one is opening. */
+    const openYouTubeMusic = async (browser: BrowserName) => {
+        if (openingIn) return
+        setOpeningIn(browser)
+        actionSeq.current++
+        actionsInFlight.current++
+        try {
+            await window.musicBar.openYouTubeMusic(browser)
+        } catch (error) {
+            console.error('[music-bar] opening YouTube Music failed', error)
+        } finally {
+            actionsInFlight.current--
+        }
+        const next = await read(window.musicBar.getNowPlaying)
+        if (next) accept(next)
+        setOpeningIn(null)
+    }
+
     return {
         state,
         stale,
-        browsers,
+        browsers: browsers ?? [],
+        needsTab,
+        openable,
+        openingIn,
+        openYouTubeMusic,
         control,
         pressed,
         togglePlay,
@@ -328,6 +360,10 @@ export function NowPlaying({
     loadingTab,
     pressed,
     artwork,
+    browsers,
+    needsTab,
+    openable,
+    openingIn,
 }: ReturnType<typeof useNowPlaying> & { artwork: ArtworkState }) {
     if (state?.status !== 'track') {
         const [title, detail] =
@@ -337,7 +373,15 @@ export function NowPlaying({
                   ? loadingTab
                       ? ['Loading YouTube Music…', 'Opening the tab for a moment']
                       : ['Your tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
-                  : ['Nothing playing', 'Open YouTube Music in Brave, Chrome or Helium']
+                  : openingIn
+                    ? ['Opening YouTube Music…', `In ${BROWSER_NAMES[openingIn]}, in the background`]
+                    : state?.status === 'none' && browsers.length === 0
+                      ? ['No browser open', 'Open Brave, Chrome or Helium, then come back']
+                      : needsTab && openable[0]
+                        ? ['Nothing playing', `Press ↵ to open YouTube Music in ${BROWSER_NAMES[openable[0]]}`]
+                        : needsTab
+                          ? ['Nothing playing', 'Set up a browser below to use YouTube Music']
+                          : ['Nothing playing', 'Search for a song to start']
         return (
             <Hero stale={stale} artwork={NO_ARTWORK} eyebrow="YouTube Music">
                 <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{title}</h1>

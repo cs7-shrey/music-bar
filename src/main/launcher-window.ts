@@ -6,6 +6,8 @@ const WIDTH = 750
 const HEIGHT = 475
 
 let window: BrowserWindow | null = null
+// Until this time, losing focus doesn't hide the launcher (see holdThroughBlur).
+let ignoreBlurUntil = 0
 
 export function createLauncherWindow(): BrowserWindow {
     window = new BrowserWindow({
@@ -38,6 +40,7 @@ export function createLauncherWindow(): BrowserWindow {
 
     // Raycast behaviour: clicking anywhere else dismisses the launcher.
     window.on('blur', () => {
+        if (Date.now() < ignoreBlurUntil) return
         if (!window?.webContents.isDevToolsOpened()) window?.hide()
     })
 
@@ -68,6 +71,14 @@ export function showLauncher(): void {
     window.show()
     window.focus()
     window.webContents.send(IPC.launcherShown)
+}
+
+/**
+ * Keeps the launcher up through a focus loss Music Bar causes itself, such
+ * as a browser bringing itself forward when a tab is opened in it.
+ */
+export function holdThroughBlur(ms: number): void {
+    ignoreBlurUntil = Date.now() + ms
 }
 
 export function hideLauncher(): void {

@@ -17,6 +17,8 @@ export const IPC = {
     nowPlayingLoadTab: 'now-playing:load-tab',
     /** renderer → main (invoke): turn repeat-one on or off on a track's tab. */
     nowPlayingSetLoop: 'now-playing:set-loop',
+    /** renderer → main (invoke): open YouTube Music in a browser, in the background. */
+    openYouTubeMusic: 'browser:open-youtube-music',
     /** renderer → main (invoke): download a song's artwork as a data: URL. */
     artworkFetch: 'artwork:fetch',
     /** renderer → main (invoke): live suggestions and songs while typing. */
@@ -119,6 +121,8 @@ export interface MusicBarApi {
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
     loadTab(source: TrackSource): Promise<void>
     fetchArtwork(url: string): Promise<string>
+    /** Opens YouTube Music in a background tab; resolves once it's running. */
+    openYouTubeMusic(browser: BrowserName): Promise<void>
     suggest(query: string): Promise<SearchResults>
     search(query: string): Promise<SearchResults>
     playNow(song: SearchSong): Promise<void>

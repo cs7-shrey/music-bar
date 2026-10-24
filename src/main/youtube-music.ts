@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import type { BrowserName, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
@@ -13,14 +13,21 @@ import type { BrowserName, BrowserStatus, NowPlaying, PlayerControl, Track, Trac
 const BROWSERS: BrowserName[] = ['Brave Browser', 'Google Chrome', 'Helium']
 const YT_MUSIC_URL = 'https://music.youtube.com/'
 
-// Chromium won't load media in a tab that has never been shown, such as one
-// restored at launch: a play request leaves the video unpaused with nothing
-// loaded (readyState 0) until the tab is opened once. Having seen media at
-// any point means the tab was shown, so the flag keeps an ordinary track
-// change (readyState briefly 0) from counting as asleep.
+// Chromium holds back loading media in a hidden page that has never played
+// any (a tab restored at launch, or one Music Bar just opened): a play request
+// leaves the video unpaused with nothing loaded (readyState 0) until the tab
+// is shown. A page that has played media loads fine from the background, so
+// the check remembers playback: YouTube's video firing 'playing', or a song
+// paused partway through (a restored song starts at 0). That keeps an
+// ordinary song change (readyState briefly 0) from counting as asleep.
 const IS_ASLEEP_JS = `((video) => {
-    if (video && video.readyState > 0) window.__musicBarSawMedia = true;
-    return !!video && video.readyState === 0 && document.visibilityState === 'hidden' && !window.__musicBarSawMedia;
+    if (!video) return false;
+    if (!video.__musicBarWatched) {
+        video.__musicBarWatched = true;
+        video.addEventListener('playing', () => { window.__musicBarPlayed = true; });
+    }
+    if (video.readyState >= 2 && (video.currentTime > 0 || !video.paused)) window.__musicBarPlayed = true;
+    return video.readyState === 0 && document.visibilityState === 'hidden' && !window.__musicBarPlayed;
 })(document.querySelector('video'))`
 
 // Returns '' when the tab has no track loaded, else the track as JSON.
@@ -86,11 +93,16 @@ type TabResult =
     | { source: TrackSource; track: Track | null; loaded: boolean }
     | { error: string; code: number | null }
 
-/** One browser's read: whether it's open, and what its YT Music tabs returned. */
+/**
+ * One browser's read: whether it's open, and what its YT Music tabs returned.
+ * With no YT Music tab, `probe` is the result of running `1` in its front
+ * tab: 'ok' when JavaScript from Apple Events works, else the error number.
+ */
 interface BrowserRead {
     browser: BrowserName
     running: boolean
     results: TabResult[]
+    probe?: 'ok' | number
 }
 
 // AppleScript error numbers that get their own browser status.
@@ -110,6 +122,8 @@ const tabKey = (source: TrackSource) => `${source.browser}:${source.windowId}:${
 // this, a pause or the gap between songs hands the card to whichever other
 // YT Music tab happens to have a paused track loaded.
 let followed: TrackSource | null = null
+// The browser of the last followed tab; listed first when offering to open one.
+let lastUsedBrowser: BrowserName | null = null
 // The followed tab's last track, shown while it briefly has no metadata
 // between songs.
 let followedTrack: Track | null = null
@@ -124,6 +138,7 @@ function isSameTab(a: TrackSource, b: TrackSource): boolean {
 
 function follow(track: Track): Track {
     followed = track.source
+    lastUsedBrowser = track.source.browser
     followedTrack = track
     return track
 }
@@ -140,11 +155,13 @@ async function readBrowser(browser: BrowserName): Promise<BrowserRead> {
 set sep to character id 9
 set out to ""
 set skipIds to {${skipIds.join(', ')}}
+set ytTabs to 0
 if application ${asString(browser)} is running then
     set out to "running" & linefeed
     tell application ${asString(browser)}
         repeat with w in windows
             repeat with t in (tabs of w whose URL starts with ${asString(YT_MUSIC_URL)})
+                set ytTabs to ytTabs + 1
                 if skipIds contains (id of t as text) then
                     set out to out & "skipped" & sep & (id of w as text) & sep & (id of t as text) & linefeed
                 else
@@ -164,6 +181,16 @@ if application ${asString(browser)} is running then
                 end if
             end repeat
         end repeat
+        if ytTabs is 0 then
+            try
+                with timeout of ${TAB_ANSWER_SECONDS} seconds
+                    execute (active tab of window 1) javascript "1"
+                end timeout
+                set out to out & "probe" & sep & "ok" & linefeed
+            on error message number errorNumber
+                set out to out & "probe" & sep & errorNumber & linefeed
+            end try
+        end if
     end tell
 end if
 return out`
@@ -181,7 +208,9 @@ return out`
 
     const lines = output.split('\n').filter(Boolean)
     const running = lines[0] === 'running'
-    const results = lines.slice(running ? 1 : 0).map((line): TabResult => {
+    const probeLine = lines.find((line) => line.startsWith('probe\t'))
+    const probe = probeLine ? (probeLine.split('\t')[1] === 'ok' ? 'ok' : Number(probeLine.split('\t')[1])) : undefined
+    const results = lines.slice(running ? 1 : 0).filter((line) => line !== probeLine).map((line): TabResult => {
             const [kind, ...rest] = line.split('\t')
             if (kind === 'error') return { code: Number(rest[0]), error: rest.slice(1).join('\t') }
             const [windowId, tabId, json] = rest
@@ -192,25 +221,60 @@ return out`
                 return { source, track: null, loaded: false }
             }
             inactiveUntil.delete(tabKey(source))
-            return { source, track: json ? { ...JSON.parse(json), source } : null, loaded: true }
+            if (!json) return { source, track: null, loaded: true }
+            const track: Track = { ...JSON.parse(json), source }
+            return { source, track, loaded: true }
         })
-    return { browser, running, results }
+    return { browser, running, results, probe }
+}
+
+// Where each browser keeps its profiles, under ~/Library/Application Support.
+const PROFILE_DIRS: Record<BrowserName, string> = {
+    'Brave Browser': 'BraveSoftware/Brave-Browser',
+    'Google Chrome': 'Google/Chrome',
+    Helium: 'net.imput.helium',
+}
+
+/**
+ * The "Allow JavaScript from Apple Events" switch as saved in the browser's
+ * last-used profile; null when it can't be read. A missing entry means the
+ * default, off. Only a fallback: the file lags behind a fresh change.
+ */
+function savedJavaScriptSetting(browser: BrowserName): boolean | null {
+    try {
+        const dir = join(homedir(), 'Library/Application Support', PROFILE_DIRS[browser])
+        const localState = JSON.parse(readFileSync(join(dir, 'Local State'), 'utf8'))
+        const profile = localState.profile?.last_used ?? 'Default'
+        const preferences = JSON.parse(readFileSync(join(dir, profile, 'Preferences'), 'utf8'))
+        return preferences.browser?.allow_javascript_apple_events === true
+    } catch {
+        return null
+    }
 }
 
 /** Sums up one open browser's read for the browser status list. */
-function browserStatus({ browser, results }: BrowserRead): BrowserStatus {
+function browserStatus({ browser, results, probe }: BrowserRead): BrowserStatus {
     const errors = results.flatMap((result) => ('error' in result ? [result] : []))
     if (errors.some((error) => error.code === ERROR_JS_FROM_APPLE_EVENTS_OFF)) return { browser, state: 'needs-setup' }
     if (errors.some((error) => error.code === ERROR_NOT_AUTHORIZED)) return { browser, state: 'needs-permission' }
     // Inactive tabs count as connected: the card offers to load them.
     if (results.some((result) => 'source' in result)) return { browser, state: 'connected' }
     if (errors[0]) return { browser, state: 'error', message: errors[0].error }
+    // No YT Music tab: the probe in its front tab says whether one would work.
+    if (probe === ERROR_JS_FROM_APPLE_EVENTS_OFF) return { browser, state: 'needs-setup' }
+    if (probe === ERROR_NOT_AUTHORIZED) return { browser, state: 'needs-permission' }
+    // Inconclusive probe (no window, or the tab didn't answer): the saved setting.
+    if (probe !== 'ok' && savedJavaScriptSetting(browser) === false) return { browser, state: 'needs-setup' }
     return { browser, state: 'no-tab' }
 }
 
 export async function getNowPlaying(): Promise<NowPlaying> {
     const reads = await Promise.all(installed.map(readBrowser))
-    const browsers = reads.filter((read) => read.running).map(browserStatus)
+    // The browser last played from comes first, for "open YouTube Music in…".
+    const browsers = reads
+        .filter((read) => read.running)
+        .map(browserStatus)
+        .sort((a, b) => Number(b.browser === lastUsedBrowser) - Number(a.browser === lastUsedBrowser))
     return { ...chooseNowPlaying(reads.flatMap((read) => read.results)), browsers }
 }
 
@@ -396,8 +460,15 @@ ${indexOf(previousTabId)}
 }
 
 /** Wakes a tab whose media Chromium is holding back (see IS_ASLEEP_JS); measured at about 0.6s. */
+// A song that's merely still loading looks asleep for a moment; asleep twice,
+// this far apart, means Chromium is holding it.
+const WAKE_RECHECK_MS = 600
+
 async function wakeIfAsleep(source: TrackSource): Promise<void> {
-    if ((await executeInTab(source, `String(${IS_ASLEEP_JS})`)) !== 'true') return
+    const isAsleep = async () => (await executeInTab(source, `String(${IS_ASLEEP_JS})`)) === 'true'
+    if (!(await isAsleep())) return
+    await new Promise((resolve) => setTimeout(resolve, WAKE_RECHECK_MS))
+    if (!(await isAsleep())) return
     await showTabUntil(
         source,
         async () => Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`)) >= 2,
@@ -444,6 +515,7 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
         followed = source
         followedTrack = null
     }
+    lastUsedBrowser = source.browser
     await enqueue(async () => {
         await executeInTab(source, js)
         if (wake) await wakeIfAsleep(source)
@@ -612,4 +684,122 @@ export async function startRadio(source: TrackSource): Promise<void> {
 export async function startRadioFromSong(videoId: string): Promise<void> {
     const tab = await tabForSong(videoId)
     await runInTab(tab, `(() => { const videoId = '${videoId}'; ${START_RADIO_JS} })()`, { wake: true })
+}
+
+const YT_MUSIC_HOME = 'https://music.youtube.com/'
+
+/**
+ * Plays a quarter second of silence (all-zero samples, not muted) in the
+ * page. Chromium only loads new media in a hidden page that has played
+ * something, and this counts while being inaudible; it has to run while the
+ * tab is on screen, since a never-played hidden page holds this clip back too.
+ * Sets window.__musicBarPrimed to 'played', or 'rejected: …'; returns 'true'.
+ */
+const SILENT_PRIMER_JS = `(() => {
+    const rate = 8000;
+    const samples = rate / 4;
+    const wav = new DataView(new ArrayBuffer(44 + samples * 2));
+    const text = (offset, value) => [...value].forEach((c, i) => wav.setUint8(offset + i, c.charCodeAt(0)));
+    text(0, 'RIFF');
+    wav.setUint32(4, 36 + samples * 2, true);
+    text(8, 'WAVE');
+    text(12, 'fmt ');
+    wav.setUint32(16, 16, true);
+    wav.setUint16(20, 1, true);
+    wav.setUint16(22, 1, true);
+    wav.setUint32(24, rate, true);
+    wav.setUint32(28, rate * 2, true);
+    wav.setUint16(32, 2, true);
+    wav.setUint16(34, 16, true);
+    text(36, 'data');
+    wav.setUint32(40, samples * 2, true);
+    const url = URL.createObjectURL(new Blob([wav.buffer], { type: 'audio/wav' }));
+    const audio = new Audio(url);
+    window.__musicBarPrimed = 'pending';
+    audio.addEventListener('playing', () => {
+        window.__musicBarPrimed = 'played';
+        window.__musicBarPlayed = true;
+    });
+    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
+    audio.play().catch((error) => {
+        window.__musicBarPrimed = 'rejected: ' + error.message;
+    });
+    return 'true';
+})()`
+const OPEN_TAB_TIMEOUT_MS = 15_000
+const SHOW_TAB_TIMEOUT_MS = 3000
+const OPEN_TAB_POLL_MS = 100
+
+/**
+ * Opens YouTube Music in a new tab of the browser's front window without
+ * bringing the browser forward, and resolves once it's running there.
+ *
+ * Chromium only loads new media in a hidden page that has already played
+ * something, and the page that counts is YouTube Music's own (it loads in a
+ * fresh page process, so showing the tab mid-navigation doesn't help). So
+ * the tab opens in the background, loads, and is then shown just long enough
+ * to play an inaudible primer (about half a second) before the window
+ * switches back. After that, play, skip and play now all load from the
+ * background. A browser with no windows gets a new one, which stays.
+ */
+export async function openYouTubeMusic(browser: BrowserName): Promise<void> {
+    if (!installed.includes(browser)) throw new Error('Unsupported browser')
+    await enqueue(async () => {
+        const created = await runAppleScript(`
+tell application ${asString(browser)}
+    if (count of windows) is 0 then
+        set w to make new window
+        set URL of active tab of w to ${asString(YT_MUSIC_HOME)}
+        return (id of w as text) & " " & (id of active tab of w as text) & " shown"
+    end if
+    set w to window 1
+    set previousIndex to active tab index of w
+    set t to make new tab at end of tabs of w with properties {URL:${asString(YT_MUSIC_HOME)}}
+    set active tab index of w to previousIndex
+    return (id of w as text) & " " & (id of t as text) & " background"
+end tell`)
+        // Making a tab brings the browser forward. It stays there for now;
+        // returning focus to the app the user was in is a follow-up.
+        const [windowId, tabId, placement] = created.split(' ')
+        const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
+
+        const check = async (js: string) => {
+            try {
+                return (await executeInTab(source, js, 1)) === 'true'
+            } catch {
+                return false // Still navigating.
+            }
+        }
+        const deadline = Date.now() + OPEN_TAB_TIMEOUT_MS
+        while (!(await check(`String(document.readyState === 'complete' && !!document.querySelector('ytmusic-app'))`))) {
+            if (Date.now() > deadline) throw new Error(`YouTube Music didn't finish loading in ${browser}`)
+            await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
+        }
+
+        // While the tab is on screen, play a moment of silence so the page
+        // counts as having played media; then songs load from the background.
+        let primerStarted = false
+        const primed = async () => {
+            if (!(await check(`String(document.visibilityState === 'visible')`))) return false
+            if (!primerStarted) {
+                primerStarted = await check(SILENT_PRIMER_JS)
+                return false
+            }
+            // Rejected (e.g. autoplay blocked) still ends the wait: the first
+            // play then falls back to the wake.
+            return check(`String(window.__musicBarPrimed !== 'pending')`)
+        }
+        if (placement === 'background') {
+            await showTabUntil(source, primed, SHOW_TAB_TIMEOUT_MS, `Couldn't show the YouTube Music tab in ${browser}`)
+        } else {
+            const deadline = Date.now() + SHOW_TAB_TIMEOUT_MS
+            while (!(await primed()) && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
+            }
+        }
+        followed = source
+        followedTrack = null
+        lastUsedBrowser = browser
+        knownTabs = [source, ...knownTabs]
+    })
 }

@@ -64,7 +64,7 @@ round trip through AppleScript into the browser tab.
 | Heavy action (rebuilds the queue or replaces the song) | Debounce: only the **last** press in a burst runs, 300ms after presses stop. Related actions share a key so the last one wins. | `debounceAction(key, run)` | Start Radio (row and ⌘R), ⌘↵ radio from search (key `'radio'`) |
 | Countable step (each press means one step) | No debounce: every press runs. | `act` | previous / next (⌘H / ⌘L) |
 | Additive, repeatable on purpose | No debounce. | — | ⇧↵ play next (queueing several songs is the point) |
-| One-off with a busy state | Ignore presses while it runs. | flag, e.g. `loadingTab` | Load an inactive tab |
+| One-off with a busy state | Ignore presses while it runs. | flag, e.g. `loadingTab`, `openingIn` | Load an inactive tab, open YouTube Music in a browser |
 
 Also:
 - Main runs actions one at a time in order (`enqueue` in `youtube-music.ts`),
