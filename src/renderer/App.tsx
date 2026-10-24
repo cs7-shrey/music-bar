@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
-import type { PlayerControl, SearchSong } from '../shared/ipc'
+import { Globe, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
 import { NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
@@ -21,6 +21,32 @@ const SOON_COMMANDS: PlaybackCommand[] = [
 ]
 
 const NOTICE_MS = 2500
+
+const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
+
+const BROWSER_STATES: Record<BrowserState, { label: string; problem: string | null }> = {
+    connected: { label: 'Connected', problem: null },
+    'no-tab': { label: 'No tab', problem: null },
+    'needs-setup': { label: 'Needs setup', problem: 'needs setup' },
+    'needs-permission': { label: 'Needs permission', problem: 'needs permission' },
+    error: { label: 'Error', problem: "can't be reached" },
+}
+
+/** What to tell the user about a browser, including how to fix it. */
+function describeBrowser({ state, message }: BrowserStatus): string {
+    switch (state) {
+        case 'connected':
+            return 'YouTube Music is connected'
+        case 'no-tab':
+            return 'No YouTube Music tab open'
+        case 'needs-setup':
+            return 'Turn on View → Developer → Allow JavaScript from Apple Events'
+        case 'needs-permission':
+            return 'Allow Music Bar in System Settings → Privacy & Security → Automation'
+        case 'error':
+            return message ?? 'Something went wrong'
+    }
+}
 
 const SHORTCUTS: Record<string, 'loop' | PlayerControl> = { o: 'loop', h: 'previous', l: 'next' }
 
@@ -196,6 +222,28 @@ export default function App() {
         </Command.Group>
     )
 
+    // Open browsers that can't be used. Listed when there are any, or when
+    // the search mentions browsers; the footer flags the first one.
+    const problems = nowPlaying.browsers.filter((browser) => BROWSER_STATES[browser.state].problem)
+    const showBrowsers = trimmed
+        ? matches(trimmed, 'browsers', 'brave', 'chrome', 'helium')
+        : problems.length > 0
+    const browserRows = showBrowsers && nowPlaying.browsers.length > 0 && (
+        <Command.Group heading="Browsers">
+            {nowPlaying.browsers.map((status) => (
+                <CommandRow
+                    key={status.browser}
+                    value={`browser:${status.browser}`}
+                    icon={<Globe strokeWidth={2.25} />}
+                    title={BROWSER_NAMES[status.browser]}
+                    subtitle={describeBrowser(status)}
+                    badge={BROWSER_STATES[status.state].label}
+                />
+            ))}
+        </Command.Group>
+    )
+    const footerProblem = problems[0]
+
     const liveResults = live.results?.status === 'ok' ? live.results : null
     const suggestions = (liveResults?.suggestions ?? []).filter((text) => text.toLowerCase() !== trimmed.toLowerCase())
 
@@ -240,6 +288,7 @@ export default function App() {
 
             <Command.List className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
                 {!trimmed && commands}
+                {!trimmed && browserRows}
 
                 {trimmed && submitted === null && (
                     <>
@@ -258,6 +307,7 @@ export default function App() {
                             </Command.Group>
                         )}
                         {commands}
+                        {browserRows}
                     </>
                 )}
 
@@ -281,7 +331,17 @@ export default function App() {
                     <span className="glass flex size-5 shrink-0 items-center justify-center rounded-full">
                         <Music2 className="size-2.5 text-white" strokeWidth={2.5} />
                     </span>
-                    <span className={`truncate ${notice ? 'text-white' : ''}`}>{notice ?? 'Music Bar'}</span>
+                    {notice ? (
+                        <span className="truncate text-white">{notice}</span>
+                    ) : footerProblem ? (
+                        <span className="truncate text-white">
+                            <span className="mr-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle" />
+                            {BROWSER_NAMES[footerProblem.browser]} {BROWSER_STATES[footerProblem.state].problem}
+                            {problems.length > 1 && ` · +${problems.length - 1} more`}
+                        </span>
+                    ) : (
+                        <span className="truncate">Music Bar</span>
+                    )}
                 </span>
                 <span className="flex shrink-0 items-center gap-4">
                     {selectedSong ? (

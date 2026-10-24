@@ -59,12 +59,32 @@ export interface Track {
     source: TrackSource
 }
 
-export type NowPlaying =
+/**
+ * Whether Music Bar can use an open browser:
+ * - connected: has a YouTube Music tab it can read and control
+ * - no-tab: open, but no YouTube Music tab
+ * - needs-setup: "Allow JavaScript from Apple Events" is off (error 12)
+ * - needs-permission: macOS hasn't allowed Music Bar to control it (error -1743)
+ * - error: anything else; see message
+ */
+export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'error'
+
+export interface BrowserStatus {
+    browser: BrowserName
+    state: BrowserState
+    message?: string
+}
+
+export type NowPlaying = (
     | { status: 'track'; track: Track }
     | { status: 'none' }
     /** A YT Music tab Brave hasn't loaded yet (restored at launch, or discarded to save memory). */
     | { status: 'unloaded'; source: TrackSource }
     | { status: 'error'; message: string }
+) & {
+    /** Every open supported browser and whether Music Bar can use it. Full reads only. */
+    browsers?: BrowserStatus[]
+}
 
 export interface SearchSong {
     videoId: string

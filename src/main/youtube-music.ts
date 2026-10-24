@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import type { BrowserName, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
 
 // Talks to YouTube Music by running JavaScript inside its tab through the
 // browser's AppleScript `execute javascript` command. This works on background
@@ -79,7 +79,20 @@ function runAppleScript(script: string): Promise<string> {
  * loaded (restored at launch without being opened, or discarded to save
  * memory): its scripts never answer, and Brave's tab info doesn't say so.
  */
-type TabResult = { source: TrackSource; track: Track | null; loaded: boolean } | { error: string }
+type TabResult =
+    | { source: TrackSource; track: Track | null; loaded: boolean }
+    | { error: string; code: number | null }
+
+/** One browser's read: whether it's open, and what its YT Music tabs returned. */
+interface BrowserRead {
+    browser: BrowserName
+    running: boolean
+    results: TabResult[]
+}
+
+// AppleScript error numbers that get their own browser status.
+const ERROR_JS_FROM_APPLE_EVENTS_OFF = 12
+const ERROR_NOT_AUTHORIZED = -1743
 
 // How long one tab gets to answer before it counts as not loaded. Without a
 // limit, one unloaded tab hangs the whole read.
@@ -112,7 +125,7 @@ function follow(track: Track): Track {
     return track
 }
 
-async function readBrowser(browser: BrowserName): Promise<TabResult[]> {
+async function readBrowser(browser: BrowserName): Promise<BrowserRead> {
     const now = Date.now()
     const skipIds = [...inactiveUntil]
         .filter(([key, retryAt]) => key.startsWith(`${browser}:`) && retryAt > now)
@@ -125,6 +138,7 @@ set sep to character id 9
 set out to ""
 set skipIds to {${skipIds.join(', ')}}
 if application ${asString(browser)} is running then
+    set out to "running" & linefeed
     tell application ${asString(browser)}
         repeat with w in windows
             repeat with t in (tabs of w whose URL starts with ${asString(YT_MUSIC_URL)})
@@ -141,7 +155,7 @@ if application ${asString(browser)} is running then
                         if errorNumber is -1712 then
                             set out to out & "unloaded" & sep & (id of w as text) & sep & (id of t as text) & linefeed
                         else
-                            set out to out & "error" & sep & message & linefeed
+                            set out to out & "error" & sep & errorNumber & sep & message & linefeed
                         end if
                     end try
                 end if
@@ -155,15 +169,18 @@ return out`
     try {
         output = await runAppleScript(script)
     } catch (error) {
-        return [{ error: error instanceof Error ? error.message : String(error) }]
+        // Failing as a whole (e.g. not authorized) means the browser is open:
+        // the running check itself needs no permission.
+        const message = error instanceof Error ? error.message : String(error)
+        const code = message.match(/\((-?\d+)\)\s*$/)?.[1]
+        return { browser, running: true, results: [{ error: message, code: code ? Number(code) : null }] }
     }
 
-    return output
-        .split('\n')
-        .filter(Boolean)
-        .map((line): TabResult => {
+    const lines = output.split('\n').filter(Boolean)
+    const running = lines[0] === 'running'
+    const results = lines.slice(running ? 1 : 0).map((line): TabResult => {
             const [kind, ...rest] = line.split('\t')
-            if (kind === 'error') return { error: rest.join('\t') }
+            if (kind === 'error') return { code: Number(rest[0]), error: rest.slice(1).join('\t') }
             const [windowId, tabId, json] = rest
             const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
             if (kind === 'skipped') return { source, track: null, loaded: false }
@@ -174,10 +191,28 @@ return out`
             inactiveUntil.delete(tabKey(source))
             return { source, track: json ? { ...JSON.parse(json), source } : null, loaded: true }
         })
+    return { browser, running, results }
+}
+
+/** Sums up one open browser's read for the browser status list. */
+function browserStatus({ browser, results }: BrowserRead): BrowserStatus {
+    const errors = results.flatMap((result) => ('error' in result ? [result] : []))
+    if (errors.some((error) => error.code === ERROR_JS_FROM_APPLE_EVENTS_OFF)) return { browser, state: 'needs-setup' }
+    if (errors.some((error) => error.code === ERROR_NOT_AUTHORIZED)) return { browser, state: 'needs-permission' }
+    // Inactive tabs count as connected: the card offers to load them.
+    if (results.some((result) => 'source' in result)) return { browser, state: 'connected' }
+    if (errors[0]) return { browser, state: 'error', message: errors[0].error }
+    return { browser, state: 'no-tab' }
 }
 
 export async function getNowPlaying(): Promise<NowPlaying> {
-    const results = (await Promise.all(installed.map(readBrowser))).flat()
+    const reads = await Promise.all(installed.map(readBrowser))
+    const browsers = reads.filter((read) => read.running).map(browserStatus)
+    return { ...chooseNowPlaying(reads.flatMap((read) => read.results)), browsers }
+}
+
+/** Picks what the card shows from every YT Music tab's read. */
+function chooseNowPlaying(results: TabResult[]): NowPlaying {
     const tabs = results.flatMap((result) => ('source' in result ? [result] : []))
     // Loaded tabs first, so search and play now avoid a tab that can't answer.
     knownTabs = [...tabs.filter((tab) => tab.loaded), ...tabs.filter((tab) => !tab.loaded)].map((tab) => tab.source)

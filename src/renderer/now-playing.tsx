@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Music2, Pause, Play } from 'lucide-react'
-import type { NowPlaying as NowPlayingState, PlayerControl, RepeatMode, SearchSong, Track } from '../shared/ipc'
+import type {
+    BrowserStatus,
+    NowPlaying as NowPlayingState,
+    PlayerControl,
+    RepeatMode,
+    SearchSong,
+    Track,
+} from '../shared/ipc'
 
 const POLL_MS = 2000
 // After an action, the acted-on tab is re-read this often until the change
@@ -44,10 +51,14 @@ export function useNowPlaying() {
         return isFresh ? next : null
     }, [])
 
+    // Every open browser and whether it can be used; only full reads carry it.
+    const [browsers, setBrowsers] = useState<BrowserStatus[]>([])
+
     const accept = useCallback((next: NowPlayingState) => {
         awaitingFreshRead.current = false
         setState(next)
         setStale(false)
+        if (next.browsers) setBrowsers(next.browsers)
     }, [])
 
     useEffect(() => {
@@ -248,7 +259,7 @@ export function useNowPlaying() {
         setLoadingTab(false)
     }
 
-    return { state, stale, control, pressed, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
+    return { state, stale, browsers, control, pressed, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
 }
 
 export function NowPlaying({
@@ -446,25 +457,64 @@ function RepeatIcon({ mode }: { mode: RepeatMode }) {
     )
 }
 
-/** Song progress; advances locally between reads while the song plays. */
-function Progress({ track }: { track: Track }) {
-    const [now, setNow] = useState(() => Date.now())
-    useEffect(() => {
-        if (!track.isPlaying) return
-        const timer = setInterval(() => setNow(Date.now()), 500)
-        return () => clearInterval(timer)
-    }, [track.isPlaying])
+// A read within this many seconds of where the bar already is counts as
+// rounding: YouTube Music keeps the position in whole seconds, so snapping to
+// every read would jerk the bar back by up to a second.
+const PROGRESS_DRIFT_TOLERANCE_S = 1.5
 
-    const elapsed = track.isPlaying ? Math.max(0, (now - track.readAt) / 1000) : 0
+/**
+ * Song progress, drawn every frame. Each read re-anchors a local clock only
+ * when it disagrees by more than rounding (a seek, a new song, a pause);
+ * otherwise the bar keeps gliding from where it is.
+ */
+function Progress({ track }: { track: Track }) {
+    const fill = useRef<HTMLDivElement>(null)
+    const elapsedLabel = useRef<HTMLSpanElement>(null)
+    // The position at a moment in time; the bar extrapolates from it while playing.
+    const anchor = useRef<{ position: number; at: number; song: string } | null>(null)
+
+    const song = `${track.title}\u0000${track.artist}`
+    const now = Date.now()
+    const reported = track.position + (track.isPlaying ? Math.max(0, (now - track.readAt) / 1000) : 0)
+    const current = anchor.current
+    const predicted = current ? current.position + (now - current.at) / 1000 : 0
+    if (
+        !current ||
+        current.song !== song ||
+        !track.isPlaying ||
+        Math.abs(reported - predicted) > PROGRESS_DRIFT_TOLERANCE_S
+    ) {
+        anchor.current = { position: reported, at: now, song }
+    }
+
     const duration = track.duration
-    const position = duration ? Math.min(track.position + elapsed, duration) : track.position + elapsed
-    const fraction = duration ? position / duration : 0
+    const playing = track.isPlaying
+
+    useEffect(() => {
+        let frame = 0
+        let shownSecond = -1
+        const draw = () => {
+            const base = anchor.current
+            if (!base) return
+            const raw = base.position + (playing ? (Date.now() - base.at) / 1000 : 0)
+            const position = duration ? Math.min(raw, duration) : raw
+            if (fill.current) fill.current.style.width = `${duration ? (position / duration) * 100 : 0}%`
+            const second = Math.floor(position)
+            if (second !== shownSecond && elapsedLabel.current) {
+                shownSecond = second
+                elapsedLabel.current.textContent = formatTime(position)
+            }
+            if (playing) frame = requestAnimationFrame(draw)
+        }
+        draw()
+        return () => cancelAnimationFrame(frame)
+    }, [track, playing, duration])
 
     return (
         <div className="flex items-center gap-2.5 text-[11px] font-medium text-subdued tabular-nums">
-            <span className="w-9 text-right">{formatTime(position)}</span>
+            <span ref={elapsedLabel} className="w-9 text-right" />
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/20">
-                <div className="h-full rounded-full bg-white" style={{ width: `${fraction * 100}%` }} />
+                <div ref={fill} className="h-full rounded-full bg-white" />
             </div>
             <span className="w-9">{duration ? formatTime(duration) : '–:––'}</span>
         </div>
