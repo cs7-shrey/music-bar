@@ -5,20 +5,9 @@ import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSon
 import { NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 
-interface PlaybackCommand {
-    id: string
-    title: string
-    subtitle: string
-    icon: ReactNode
-}
-
 const PLAY_PAUSE_COMMAND = 'Play or Pause'
 const LOOP_COMMAND = 'Loop Current Song'
-
-// Placeholders until each command is wired to YouTube Music.
-const SOON_COMMANDS: PlaybackCommand[] = [
-    { id: 'start-radio', title: 'Start Radio', subtitle: 'Start a radio from another song', icon: <Radio /> },
-]
+const RADIO_COMMAND = 'Start Radio'
 
 const NOTICE_MS = 2500
 
@@ -48,7 +37,8 @@ function describeBrowser({ state, message }: BrowserStatus): string {
     }
 }
 
-const SHORTCUTS: Record<string, 'loop' | PlayerControl> = { o: 'loop', h: 'previous', l: 'next' }
+// ⌘R is free: the app menu has no Reload item (see index.ts).
+const SHORTCUTS: Record<string, 'loop' | 'radio' | PlayerControl> = { o: 'loop', r: 'radio', h: 'previous', l: 'next' }
 
 const matches = (query: string, ...texts: string[]) =>
     texts.some((text) => text.toLowerCase().includes(query.toLowerCase()))
@@ -130,7 +120,22 @@ export default function App() {
         reset()
     }
 
+    // Debounced inside nowPlaying.startRadio, so the row, ⌘R and repeats of
+    // either start one radio.
+    const startRadio = () => {
+        if (!track || isAd) return
+        nowPlaying.startRadio()
+        setNotice(`Starting a radio from “${track.title}”`)
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
+        // ⌘↵ on a song starts a radio from it, then returns to the card.
+        if (event.key === 'Enter' && event.metaKey && selectedSong) {
+            event.preventDefault()
+            nowPlaying.startRadioFrom(selectedSong)
+            reset()
+            return
+        }
         // ⇧↵ on a song queues it instead of playing it; the results stay up
         // so several songs can be queued in a row.
         if (event.key === 'Enter' && event.shiftKey && selectedSong) {
@@ -139,11 +144,12 @@ export default function App() {
             return
         }
         // Player shortcuts work from anywhere, even mid-search: ⌘O loop,
-        // ⌘H previous, ⌘L next.
+        // ⌘R radio, ⌘H previous, ⌘L next.
         const shortcut = event.metaKey && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]
         if (shortcut) {
             event.preventDefault()
             if (shortcut === 'loop') nowPlaying.toggleLoop()
+            else if (shortcut === 'radio') startRadio()
             else nowPlaying.control(shortcut)
             return
         }
@@ -158,10 +164,8 @@ export default function App() {
 
     const showPlayPause = !trimmed || matches(trimmed, 'play', 'pause', 'resume')
     const showLoop = !trimmed || matches(trimmed, LOOP_COMMAND, 'repeat', 'stop looping')
-    const soonCommands = SOON_COMMANDS.filter(
-        (command) => !trimmed || matches(trimmed, command.title, command.subtitle),
-    )
-    const commands = (showPlayPause || showLoop || soonCommands.length > 0) && (
+    const showRadio = !trimmed || matches(trimmed, RADIO_COMMAND, 'mix')
+    const commands = (showPlayPause || showLoop || showRadio) && (
         <Command.Group heading="Playback">
             {showPlayPause &&
                 (nowPlaying.state?.status === 'unloaded' ? (
@@ -217,17 +221,23 @@ export default function App() {
                     onSelect={nowPlaying.toggleLoop}
                 />
             )}
-            {soonCommands.map((command) => (
+            {showRadio && (
                 <CommandRow
-                    key={command.id}
-                    value={command.title}
-                    icon={command.icon}
-                    title={command.title}
-                    subtitle={isAd ? 'Not available during ads' : command.subtitle}
-                    badge="Soon"
-                    muted={isAd}
+                    value={RADIO_COMMAND}
+                    icon={<Radio strokeWidth={2.25} />}
+                    title="Start Radio"
+                    subtitle={
+                        isAd
+                            ? 'Not available during ads'
+                            : track
+                              ? `A mix based on “${track.title}”`
+                              : 'Nothing is playing'
+                    }
+                    shortcut="⌘R"
+                    muted={!track || isAd}
+                    onSelect={startRadio}
                 />
-            ))}
+            )}
         </Command.Group>
     )
 
@@ -357,6 +367,7 @@ export default function App() {
                         <>
                             <Hint keys="↵" label="Play" />
                             <Hint keys="⇧↵" label="Play next" />
+                            <Hint keys="⌘↵" label="Radio" />
                         </>
                     ) : (
                         <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />

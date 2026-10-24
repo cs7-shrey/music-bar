@@ -18,7 +18,8 @@ const SETTLE_TIMEOUT_MS = 4000
 // so a fast read doesn't flash it dim and back.
 const STALE_DIM_DELAY_MS = 300
 // Rapid presses of play/pause or loop only flip the UI; the page gets the
-// final state once the presses stop.
+// final state once the presses stop. Other debounced actions (see
+// debounceAction) wait the same time and run only the last press.
 const TOGGLE_DEBOUNCE_MS = 300
 // How long a skip button shows as pressed, so ⌘H/⌘L look like a click.
 const PRESS_FLASH_MS = 160
@@ -193,6 +194,21 @@ export function useNowPlaying() {
     const track = state?.status === 'track' ? state.track : null
     latestTrack.current = track
 
+    const pendingActions = useRef<Partial<Record<string, ReturnType<typeof setTimeout>>>>({})
+
+    /**
+     * Runs only the last of rapid calls under one key, once they stop, so
+     * repeated presses of a heavy action (one that rebuilds the queue) do it
+     * once. For toggles, use debouncedToggle, which also flips the UI at once.
+     */
+    const debounceAction = (key: string, run: () => void) => {
+        clearTimeout(pendingActions.current[key])
+        pendingActions.current[key] = setTimeout(() => {
+            delete pendingActions.current[key]
+            run()
+        }, TOGGLE_DEBOUNCE_MS)
+    }
+
     const [pressed, setPressed] = useState<PlayerControl | null>(null)
     const pressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -229,7 +245,8 @@ export function useNowPlaying() {
             (target, next) => (next.repeatMode === 'ONE') === (target.repeatMode === 'ONE'),
         )
 
-    const playNow = (song: SearchSong) => {
+    /** Shows a search result on the card right away, then plays it via `run`. */
+    const startSong = (song: SearchSong, run: () => Promise<void>) => {
         const before = track
         return act(
             (current) => ({
@@ -239,9 +256,34 @@ export function useNowPlaying() {
                 album: '',
                 artworkUrl: song.thumbnailUrl,
                 isPlaying: true,
+                isAd: false,
             }),
-            () => window.musicBar.playNow(song),
+            run,
             (next) => !before || !sameSong(next, before),
+        )
+    }
+
+    const playNow = (song: SearchSong) => startSong(song, () => window.musicBar.playNow(song))
+
+    // Both radio actions rebuild the queue, so they share one debounce key:
+    // the last radio request in a burst is the one that runs.
+
+    /** A radio (YouTube's "Start mix") from a search result. */
+    const startRadioFrom = (song: SearchSong) =>
+        debounceAction('radio', () => void startSong(song, () => window.musicBar.startRadioFromSong(song)))
+
+    /** A radio from the current song; it keeps playing, with a new queue after it. */
+    const startRadio = () => {
+        if (!track || track.isAd) return
+        const { source } = track
+        debounceAction(
+            'radio',
+            () =>
+                void act(
+                    (current) => current,
+                    () => window.musicBar.startRadio(source),
+                    () => true,
+                ),
         )
     }
 
@@ -261,7 +303,20 @@ export function useNowPlaying() {
         setLoadingTab(false)
     }
 
-    return { state, stale, browsers, control, pressed, togglePlay, toggleLoop, playNow, loadTab, loadingTab }
+    return {
+        state,
+        stale,
+        browsers,
+        control,
+        pressed,
+        togglePlay,
+        toggleLoop,
+        playNow,
+        startRadio,
+        startRadioFrom,
+        loadTab,
+        loadingTab,
+    }
 }
 
 export function NowPlaying({

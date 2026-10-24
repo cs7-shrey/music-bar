@@ -27,6 +27,10 @@ export const IPC = {
     playNow: 'player:play-now',
     /** renderer → main (invoke): queue a song right after the current one. */
     playNext: 'player:play-next',
+    /** renderer → main (invoke): start a radio (YouTube's "Start mix") from a tab's current song. */
+    startRadio: 'player:start-radio',
+    /** renderer → main (invoke): start a radio from a search result. */
+    startRadioFromSong: 'player:start-radio-from-song',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -119,4 +123,6 @@ export interface MusicBarApi {
     search(query: string): Promise<SearchResults>
     playNow(song: SearchSong): Promise<void>
     playNext(song: SearchSong): Promise<void>
+    startRadio(source: TrackSource): Promise<void>
+    startRadioFromSong(song: SearchSong): Promise<void>
 }

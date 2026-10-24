@@ -578,3 +578,38 @@ export async function playNext(videoId: string): Promise<void> {
         `),
     )
 }
+
+/**
+ * Script that starts a radio the way the menu's "Start mix" does: the same
+ * navigation event play now uses, with the mix playlist (RDAMVM + video id)
+ * and the params the real menu item carries. Expects `videoId` in scope.
+ */
+const START_RADIO_JS = `
+    if (videoId) {
+        document.querySelector('ytmusic-app').dispatchEvent(new CustomEvent('yt-navigate', {
+            bubbles: true,
+            composed: true,
+            detail: { endpoint: { watchEndpoint: { videoId, playlistId: 'RDAMVM' + videoId, params: 'wAEB' } } },
+        }));
+    }`
+
+/** Starts a radio from the song playing in a tab, replacing its queue. */
+export async function startRadio(source: TrackSource): Promise<void> {
+    // The page URL doesn't always carry the current song's id (e.g. on a
+    // library page with the mini player), but YouTube's player knows it; it
+    // lives in the page world.
+    await runInTab(
+        source,
+        inPageWorld(`
+            const videoId = document.querySelector('#movie_player')?.getVideoData?.().video_id;
+            ${START_RADIO_JS}
+        `),
+        { wake: true },
+    )
+}
+
+/** Starts a radio from a search result in the followed tab. */
+export async function startRadioFromSong(videoId: string): Promise<void> {
+    const tab = await tabForSong(videoId)
+    await runInTab(tab, `(() => { const videoId = '${videoId}'; ${START_RADIO_JS} })()`, { wake: true })
+}

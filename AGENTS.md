@@ -51,3 +51,24 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - The launcher hides on blur and on Esc. Hiding through `hideLauncher()` also
   calls `app.hide()` so focus returns to the previous app.
 - Renderer code never imports Electron; go through `window.musicBar`.
+
+## Player actions: debouncing and ordering
+
+Every new action that changes playback must pick one of these, on purpose.
+Rapid presses are normal (users mash ↵ and shortcuts), and each action is a
+round trip through AppleScript into the browser tab.
+
+| Kind of action | Rule | Helper (`src/renderer/now-playing.tsx`) | Examples |
+|---|---|---|---|
+| Toggle (has an on/off state) | Flip the UI at once; send only the **final state** 300ms after presses stop. Main must *set* the state (idempotent), never toggle it. | `debouncedToggle` | play/pause (`setPlaying`), loop (`setLoop`) |
+| Heavy action (rebuilds the queue or replaces the song) | Debounce: only the **last** press in a burst runs, 300ms after presses stop. Related actions share a key so the last one wins. | `debounceAction(key, run)` | Start Radio (row and ⌘R), ⌘↵ radio from search (key `'radio'`) |
+| Countable step (each press means one step) | No debounce: every press runs. | `act` | previous / next (⌘H / ⌘L) |
+| Additive, repeatable on purpose | No debounce. | — | ⇧↵ play next (queueing several songs is the point) |
+| One-off with a busy state | Ignore presses while it runs. | flag, e.g. `loadingTab` | Load an inactive tab |
+
+Also:
+- Main runs actions one at a time in order (`enqueue` in `youtube-music.ts`),
+  so even un-debounced presses reach the page in sequence.
+- Every action bumps `actionSeq`, so reads that started before it are
+  discarded and can't overwrite the optimistic UI.
+- Search requests are debounced too (200ms, `useSuggestions` in `search.tsx`).
