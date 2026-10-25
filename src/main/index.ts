@@ -23,6 +23,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('second-instance', () => showLauncher())
+// Opening the app again from Spotlight, Finder or Launchpad while it runs
+// reopens it rather than starting a second copy. Show the launcher, like
+// Raycast, instead of quietly taking focus with nothing on screen.
+app.on('activate', () => showLauncher())
 
 function createTray(): void {
     // A template image: macOS tints it for light and dark menu bars and picks
@@ -57,6 +61,9 @@ app.whenReady().then(() => {
 
     createLauncherWindow()
     createTray()
+    // Opening the app shows the launcher. Not in `pnpm dev`, which restarts
+    // the app on every main-process change.
+    if (app.isPackaged) showLauncher()
 
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
     ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())

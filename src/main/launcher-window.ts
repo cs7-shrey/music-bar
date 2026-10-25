@@ -8,6 +8,10 @@ const HEIGHT = 475
 let window: BrowserWindow | null = null
 // Until this time, losing focus doesn't hide the launcher (see holdThroughBlur).
 let ignoreBlurUntil = 0
+// A launcher shown before its page has loaded would be blank, so a show
+// asked for at startup waits for the load.
+let loaded = false
+let showWhenLoaded = false
 
 export function createLauncherWindow(): BrowserWindow {
     window = new BrowserWindow({
@@ -46,6 +50,11 @@ export function createLauncherWindow(): BrowserWindow {
 
     window.on('hide', () => window?.webContents.send(IPC.launcherHidden))
 
+    window.webContents.once('did-finish-load', () => {
+        loaded = true
+        if (showWhenLoaded) showLauncher()
+    })
+
     // Renderer warnings and errors land in the terminal running the app.
     window.webContents.on('console-message', ({ level, message }) => {
         if (level === 'warning' || level === 'error') console.log(`[renderer:${level}] ${message}`)
@@ -62,6 +71,10 @@ export function createLauncherWindow(): BrowserWindow {
 
 export function showLauncher(): void {
     if (!window) return
+    if (!loaded) {
+        showWhenLoaded = true
+        return
+    }
     // Open on the display the user is working on, a little above centre.
     const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     window.setPosition(
