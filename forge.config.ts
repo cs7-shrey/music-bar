@@ -1,3 +1,5 @@
+import { execFileSync } from 'child_process'
+import { join } from 'path'
 import type { ForgeConfig } from '@electron-forge/shared-types'
 import { VitePlugin } from '@electron-forge/plugin-vite'
 import { MakerZIP } from '@electron-forge/maker-zip'
@@ -18,6 +20,20 @@ const config: ForgeConfig = {
         },
     },
     makers: [new MakerZIP({}, ['darwin'])],
+    hooks: {
+        // Packaging renames Electron's app and edits its Info.plist and icon,
+        // which breaks the ad-hoc signature Electron ships with. A downloaded
+        // copy then fails Gatekeeper as "damaged". Re-sign ad-hoc over the
+        // final files so it gets the "Open Anyway" prompt instead. Replace
+        // with Developer ID signing (osxSign) once there's a certificate.
+        postPackage: async (config, { outputPaths, platform }) => {
+            if (platform !== 'darwin') return
+            const appName = `${config.packagerConfig.name}.app`
+            for (const outputPath of outputPaths) {
+                execFileSync('codesign', ['--force', '--deep', '--sign', '-', join(outputPath, appName)])
+            }
+        },
+    },
     plugins: [
         new VitePlugin({
             build: [
