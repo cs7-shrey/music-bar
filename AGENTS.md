@@ -39,6 +39,9 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   a YT Music tab so requests carry the user's session. Songs and videos are
   told apart from albums/playlists/profiles by `videoId` and
   `musicVideoType`, never by the localized "Song"/"Album" labels.
+- `src/main/frontmost-app.ts` — reads and restores the frontmost app through
+  AppKit (JXA), no Automation permission needed. Opening YouTube Music brings
+  the browser forward; this puts the user's app back in front.
 - `src/preload/` — exposes `window.musicBar` via `contextBridge`.
 - `src/shared/` — IPC channel names and the `MusicBarApi` type, shared by all
   processes. Add every new IPC channel here.
@@ -51,6 +54,14 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - The launcher hides on blur and on Esc. Hiding through `hideLauncher()` also
   calls `app.hide()` so focus returns to the previous app.
 - Renderer code never imports Electron; go through `window.musicBar`.
+
+## Commits
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+`<type>(<optional scope>): <summary>`, e.g. `feat(search): start radio from a
+song`, `fix(open): return focus to the previous app`. Types: `feat`, `fix`,
+`refactor`, `perf`, `style`, `docs`, `test`, `build`, `chore`. Summary in the
+imperative, lower case, no trailing period.
 
 ## Player actions: debouncing and ordering
 
