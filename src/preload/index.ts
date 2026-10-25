@@ -25,6 +25,7 @@ const api: MusicBarApi = {
     playNext: (song) => ipcRenderer.invoke(IPC.playNext, song.videoId),
     startRadio: (source) => ipcRenderer.invoke(IPC.startRadio, source),
     startRadioFromSong: (song) => ipcRenderer.invoke(IPC.startRadioFromSong, song.videoId),
+    showTab: (source) => ipcRenderer.invoke(IPC.showTab, source),
     showSetup: () => ipcRenderer.send(IPC.setupShow),
     getSetup: () => ipcRenderer.invoke(IPC.setupGet),
     setBrowsers: (browsers) => ipcRenderer.invoke(IPC.setupSetBrowsers, browsers),

@@ -31,6 +31,8 @@ export const IPC = {
     playNext: 'player:play-next',
     /** renderer → main (invoke): start a radio (YouTube's "Start mix") from a tab's current song. */
     startRadio: 'player:start-radio',
+    /** renderer → main (invoke): bring a tab and its browser to the front. */
+    showTab: 'player:show-tab',
     /** renderer → main (invoke): start a radio from a search result. */
     startRadioFromSong: 'player:start-radio-from-song',
     /** renderer → main: open the setup window, or bring it forward. */
@@ -78,6 +80,11 @@ export interface Track {
     readAt: number
     /** An ad is playing; title and artist are the ad's, and position isn't tracked. */
     isAd: boolean
+    /**
+     * The browser won't let this page start sound until the user clicks or
+     * types in it (Chromium's autoplay rule); play requests do nothing until then.
+     */
+    playBlocked: boolean
     source: TrackSource
 }
 
@@ -158,6 +165,7 @@ export interface MusicBarApi {
     playNext(song: SearchSong): Promise<void>
     startRadio(source: TrackSource): Promise<void>
     startRadioFromSong(song: SearchSong): Promise<void>
+    showTab(source: TrackSource): Promise<void>
     showSetup(): void
     getSetup(): Promise<SetupInfo>
     setBrowsers(browsers: BrowserName[]): Promise<void>

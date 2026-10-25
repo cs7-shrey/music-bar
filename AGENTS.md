@@ -35,6 +35,12 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   Scripts run in the browser's isolated world: DOM and cookies are shared
   with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`
   cannot await; use `evaluateAsyncInTab` for anything async.
+  Browsers refuse to start sound in a page the user hasn't clicked or typed
+  in, unless the site has enough "media engagement" (Chrome ships it for
+  YouTube Music, Brave earns it, Helium starts without). Scripted clicks
+  don't count. Actions that start playback probe for this first
+  (`isPlaybackBlocked`); a blocked tab reports `playBlocked`, and the
+  launcher offers Show Tab so the user can click play once.
 - `src/main/youtube-music-search.ts` — search via YouTube Music's internal
   InnerTube API (`music/get_search_suggestions`, `search`), called from inside
   a YT Music tab so requests carry the user's session. Songs and videos are

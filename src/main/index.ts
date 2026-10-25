@@ -141,6 +141,7 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
     ipcMain.handle(IPC.playNow, (_event, videoId: string) => youtubeMusic.playNow(videoId))
     ipcMain.handle(IPC.playNext, (_event, videoId: string) => youtubeMusic.playNext(videoId))
+    ipcMain.handle(IPC.showTab, (_event, source: TrackSource) => youtubeMusic.showTab(source))
     ipcMain.handle(IPC.startRadio, (_event, source: TrackSource) => youtubeMusic.startRadio(source))
     ipcMain.handle(IPC.startRadioFromSong, (_event, videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 

@@ -31,6 +31,32 @@ const IS_ASLEEP_JS = `((video) => {
     return video.readyState === 0 && document.visibilityState === 'hidden' && !window.__musicBarPlayed;
 })(document.querySelector('video'))`
 
+// A new Audio element holding a quarter second of silence (all-zero samples,
+// not muted): it counts as playing sound while being inaudible.
+const SILENT_AUDIO_JS = `(() => {
+    const rate = 8000;
+    const samples = rate / 4;
+    const wav = new DataView(new ArrayBuffer(44 + samples * 2));
+    const text = (offset, value) => [...value].forEach((c, i) => wav.setUint8(offset + i, c.charCodeAt(0)));
+    text(0, 'RIFF');
+    wav.setUint32(4, 36 + samples * 2, true);
+    text(8, 'WAVE');
+    text(12, 'fmt ');
+    wav.setUint32(16, 16, true);
+    wav.setUint16(20, 1, true);
+    wav.setUint16(22, 1, true);
+    wav.setUint32(24, rate, true);
+    wav.setUint32(28, rate * 2, true);
+    wav.setUint16(32, 2, true);
+    wav.setUint16(34, 16, true);
+    text(36, 'data');
+    wav.setUint32(40, samples * 2, true);
+    const url = URL.createObjectURL(new Blob([wav.buffer], { type: 'audio/wav' }));
+    const audio = new Audio(url);
+    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
+    return audio;
+})()`
+
 // Returns '' when the tab has no track loaded, else the track as JSON.
 // During an ad, YouTube's player gets the ad-showing class and the song info
 // is the ad's; the player bar's play button and slider stop working.
@@ -41,6 +67,8 @@ const IS_ASLEEP_JS = `((video) => {
 // told to play while Chromium holds off loading media until it is opened,
 // leaving the video unpaused with no data (readyState 0). readyState 2 means
 // data for the current position, which buffering stalls keep.
+// playBlocked: the browser refused to start sound in this page (see
+// AUTOPLAY_PROBE); a click or keypress in the page lifts that.
 const READ_TRACK_JS = `(() => {
     const m = navigator.mediaSession.metadata;
     if (!m || !m.title) return '';
@@ -59,6 +87,7 @@ const READ_TRACK_JS = `(() => {
         duration: Number(slider?.getAttribute('aria-valuemax')) || null,
         readAt: Date.now(),
         isAd: !!document.querySelector('#movie_player.ad-showing'),
+        playBlocked: !!window.__musicBarBlocked && !navigator.userActivation.hasBeenActive && !(video && !video.paused),
     });
 })()`
 
@@ -506,11 +535,11 @@ async function wakeIfAsleep(source: TrackSource): Promise<void> {
         source,
         async () => Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`)) >= 2,
         WAKE_TIMEOUT_MS,
-        "Brave hasn't loaded this YouTube Music tab yet. Open it once to start playback.",
+        `${source.browser} hasn't loaded this YouTube Music tab yet. Open it once to start playback.`,
     )
 }
 
-/** Gets Brave to load a tab it restored or discarded without loading. */
+/** Gets the browser to load a tab it restored or discarded without loading. */
 export async function loadTab(source: TrackSource): Promise<void> {
     await enqueue(() =>
         showTabUntil(
@@ -524,10 +553,41 @@ export async function loadTab(source: TrackSource): Promise<void> {
                 }
             },
             LOAD_TAB_TIMEOUT_MS,
-            "Brave didn't load the YouTube Music tab. Open it once, then try again.",
+            `${source.browser} didn't load the YouTube Music tab. Open it once, then try again.`,
         ),
     )
     inactiveUntil.delete(tabKey(source))
+}
+
+/**
+ * Whether the browser lets this page start sound. Chromium refuses until the
+ * user has clicked or typed in the page, unless the site has enough "media
+ * engagement": Chrome ships a list that includes YouTube Music, Brave earns
+ * it with use, and Helium (no Google services) starts with neither. Scripted
+ * clicks don't count as interacting, so the player just stays paused.
+ *
+ * Plays the silent clip and watches for the refusal, which comes at once. An
+ * allowed clip in a hidden, never-played tab stays pending instead (Chromium
+ * holds its media back), so pending counts as allowed. Sets
+ * window.__musicBarBlocked for reads to report.
+ */
+const AUTOPLAY_PROBE = `
+    if (window.__musicBarPlayed || navigator.userActivation.hasBeenActive) return 'allowed';
+    const audio = ${SILENT_AUDIO_JS};
+    const result = await Promise.race([
+        audio.play().then(() => 'allowed', (error) => (error.name === 'NotAllowedError' ? 'blocked' : 'allowed')),
+        new Promise((resolve) => setTimeout(() => resolve('allowed'), 500)),
+    ]);
+    audio.pause();
+    window.__musicBarBlocked = result === 'blocked';
+    return result;`
+
+async function isPlaybackBlocked(source: TrackSource): Promise<boolean> {
+    try {
+        return (await evaluateAsyncInTab(source, AUTOPLAY_PROBE, 3000)) === 'blocked'
+    } catch {
+        return false // Can't tell; let the action try.
+    }
 }
 
 /** Runs actions one at a time so rapid presses reach the page in order. */
@@ -540,7 +600,9 @@ function enqueue(action: () => Promise<void>): Promise<void> {
 /**
  * Runs a user action in one specific tab and starts following that tab.
  * Actions that start playback pass wake, so a tab Chromium hasn't loaded yet
- * gets woken right after the action asks it to play.
+ * gets woken right after the action asks it to play. A tab the browser won't
+ * let play still gets the action, so the song is there to start by hand, but
+ * isn't woken: showing it wouldn't help. Reads then report playBlocked.
  */
 async function runInTab(source: TrackSource, js: string, { wake = false } = {}): Promise<void> {
     // Whatever the user just acted on is the tab to follow.
@@ -550,9 +612,32 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
     }
     lastUsedBrowser = source.browser
     await enqueue(async () => {
+        const blocked = wake && (await isPlaybackBlocked(source))
         await executeInTab(source, js)
-        if (wake) await wakeIfAsleep(source)
+        if (wake && !blocked) await wakeIfAsleep(source)
     })
+}
+
+/**
+ * Brings a tab to the front, browser included, for the user to interact
+ * with: the way past a browser that won't let the page play on its own.
+ */
+export async function showTab(source: TrackSource): Promise<void> {
+    if (!BROWSERS.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
+        throw new Error('Invalid tab')
+    }
+    await runAppleScript(`
+tell application ${asString(source.browser)}
+    set w to window id ${source.windowId}
+    set i to 0
+    repeat with t in tabs of w
+        set i to i + 1
+        if (id of t as text) is "${source.tabId}" then exit repeat
+    end repeat
+    set active tab index of w to i
+    set index of w to 1
+    activate
+end tell`)
 }
 
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
@@ -722,39 +807,20 @@ export async function startRadioFromSong(videoId: string): Promise<void> {
 const YT_MUSIC_HOME = 'https://music.youtube.com/'
 
 /**
- * Plays a quarter second of silence (all-zero samples, not muted) in the
- * page. Chromium only loads new media in a hidden page that has played
+ * Plays a quarter second of silence in the page. Chromium only loads new media in a hidden page that has played
  * something, and this counts while being inaudible; it has to run while the
  * tab is on screen, since a never-played hidden page holds this clip back too.
  * Sets window.__musicBarPrimed to 'played', or 'rejected: …'; returns 'true'.
  */
 const SILENT_PRIMER_JS = `(() => {
-    const rate = 8000;
-    const samples = rate / 4;
-    const wav = new DataView(new ArrayBuffer(44 + samples * 2));
-    const text = (offset, value) => [...value].forEach((c, i) => wav.setUint8(offset + i, c.charCodeAt(0)));
-    text(0, 'RIFF');
-    wav.setUint32(4, 36 + samples * 2, true);
-    text(8, 'WAVE');
-    text(12, 'fmt ');
-    wav.setUint32(16, 16, true);
-    wav.setUint16(20, 1, true);
-    wav.setUint16(22, 1, true);
-    wav.setUint32(24, rate, true);
-    wav.setUint32(28, rate * 2, true);
-    wav.setUint16(32, 2, true);
-    wav.setUint16(34, 16, true);
-    text(36, 'data');
-    wav.setUint32(40, samples * 2, true);
-    const url = URL.createObjectURL(new Blob([wav.buffer], { type: 'audio/wav' }));
-    const audio = new Audio(url);
+    const audio = ${SILENT_AUDIO_JS};
     window.__musicBarPrimed = 'pending';
     audio.addEventListener('playing', () => {
         window.__musicBarPrimed = 'played';
         window.__musicBarPlayed = true;
     });
-    audio.addEventListener('ended', () => URL.revokeObjectURL(url));
     audio.play().catch((error) => {
+        if (error.name === 'NotAllowedError') window.__musicBarBlocked = true;
         window.__musicBarPrimed = 'rejected: ' + error.message;
     });
     return 'true';

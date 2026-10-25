@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ExternalLink, Globe, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
 import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
@@ -191,6 +191,16 @@ export default function App() {
             />
         ) : nowPlaying.needsTab && openRows.length > 0 ? (
             openRows
+        ) : track?.playBlocked ? (
+            // The browser won't start sound until the page gets a real click;
+            // same value, so ↵ goes straight to the fix.
+            <CommandRow
+                value={PLAY_PAUSE_COMMAND}
+                icon={<MousePointerClick strokeWidth={2.25} />}
+                title="Show Tab"
+                subtitle={`Click play there once: ${BROWSER_NAMES[track.source.browser]} won't start sound until you do`}
+                onSelect={nowPlaying.showTab}
+            />
         ) : (
             <CommandRow
                 // Stable value so the selection does not jump when the title flips.
@@ -391,6 +401,11 @@ export default function App() {
                     <img src={markUrl} alt="" className="size-5 shrink-0" draggable={false} />
                     {notice ? (
                         <span className="truncate text-white">{notice}</span>
+                    ) : track?.playBlocked ? (
+                        <span className="truncate text-white">
+                            <span className="mr-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle" />
+                            {BROWSER_NAMES[track.source.browser]} needs one click in the tab to play
+                        </span>
                     ) : footerProblem ? (
                         <span className="truncate text-white">
                             <span className="mr-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle" />

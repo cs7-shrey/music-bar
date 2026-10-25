@@ -293,7 +293,17 @@ export function useNowPlaying() {
 
     const [loadingTab, setLoadingTab] = useState(false)
 
-    /** Gets Brave to load an inactive YT Music tab; the next read shows its song. */
+    /** Gets the browser to load an inactive YT Music tab; the next read shows its song. */
+    /**
+     * Brings the playing tab forward when the browser won't let it play on
+     * its own; one click in the page lifts that. Showing a tab twice does no
+     * harm, so no debounce.
+     */
+    const showTab = () => {
+        const source = state?.status === 'track' ? state.track.source : null
+        if (source) void window.musicBar.showTab(source)
+    }
+
     const loadTab = async () => {
         if (state?.status !== 'unloaded' || loadingTab) return
         const { source } = state
@@ -347,6 +357,7 @@ export function useNowPlaying() {
         startRadio,
         startRadioFrom,
         loadTab,
+        showTab,
         loadingTab,
     }
 }
@@ -372,7 +383,10 @@ export function NowPlaying({
                 : state?.status === 'unloaded'
                   ? loadingTab
                       ? ['Loading YouTube Music…', 'Opening the tab for a moment']
-                      : ['Your tab is inactive', 'Brave unloaded it to save memory. Press ↵ to load it.']
+                      : [
+                            'Your tab is inactive',
+                            `${BROWSER_NAMES[state.source.browser]} unloaded it to save memory. Press ↵ to load it.`,
+                        ]
                   : openingIn
                     ? ['Opening YouTube Music…', `In ${BROWSER_NAMES[openingIn]}, in the background`]
                     : state?.status === 'none' && browsers.length === 0
@@ -397,7 +411,17 @@ export function NowPlaying({
         <Hero
             stale={stale}
             artwork={artwork}
-            eyebrow={track.isAd ? (track.isPlaying ? 'Ad playing' : 'Ad paused') : track.isPlaying ? 'Now playing' : 'Paused'}
+            eyebrow={
+                track.playBlocked
+                    ? `${BROWSER_NAMES[track.source.browser]} blocked playback`
+                    : track.isAd
+                      ? track.isPlaying
+                          ? 'Ad playing'
+                          : 'Ad paused'
+                      : track.isPlaying
+                        ? 'Now playing'
+                        : 'Paused'
+            }
             controls={
                 <div className="flex items-center gap-1.5">
                     <IconButton
@@ -440,11 +464,19 @@ export function NowPlaying({
         >
             <h1 className="truncate text-[26px] leading-tight font-extrabold tracking-tight">{track.title}</h1>
             <p className="truncate text-sm font-semibold text-subdued">{track.artist}</p>
-            {track.isAsleep && !track.isPlaying && (
+            {track.playBlocked ? (
                 <p className="truncate text-xs font-medium text-subdued">
-                    <span className="mr-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" />
-                    Brave hasn't loaded this tab yet · Play opens it for a moment
+                    <span className="mr-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle" />
+                    Click play once in the tab · ↵ shows it
                 </p>
+            ) : (
+                track.isAsleep &&
+                !track.isPlaying && (
+                    <p className="truncate text-xs font-medium text-subdued">
+                        <span className="mr-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" />
+                        {BROWSER_NAMES[track.source.browser]} hasn't loaded this tab yet · Play opens it for a moment
+                    </p>
+                )
             )}
         </Hero>
     )
