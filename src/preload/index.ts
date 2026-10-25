@@ -25,6 +25,13 @@ const api: MusicBarApi = {
     playNext: (song) => ipcRenderer.invoke(IPC.playNext, song.videoId),
     startRadio: (source) => ipcRenderer.invoke(IPC.startRadio, source),
     startRadioFromSong: (song) => ipcRenderer.invoke(IPC.startRadioFromSong, song.videoId),
+    showSetup: () => ipcRenderer.send(IPC.setupShow),
+    getSetup: () => ipcRenderer.invoke(IPC.setupGet),
+    setBrowsers: (browsers) => ipcRenderer.invoke(IPC.setupSetBrowsers, browsers),
+    checkBrowser: (browser) => ipcRenderer.invoke(IPC.setupCheck, browser),
+    openBrowser: (browser) => ipcRenderer.invoke(IPC.setupOpenBrowser, browser),
+    openAutomationSettings: () => ipcRenderer.invoke(IPC.setupOpenAutomationSettings),
+    finishSetup: () => ipcRenderer.send(IPC.setupFinish),
 }
 
 contextBridge.exposeInMainWorld('musicBar', api)

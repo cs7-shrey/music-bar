@@ -376,7 +376,7 @@ export function NowPlaying({
                   : openingIn
                     ? ['Opening YouTube Music…', `In ${BROWSER_NAMES[openingIn]}, in the background`]
                     : state?.status === 'none' && browsers.length === 0
-                      ? ['No browser open', 'Open Brave, Chrome or Helium, then come back']
+                      ? ['No browser open', 'Open your browser, then come back']
                       : needsTab && openable[0]
                         ? ['Nothing playing', `Press ↵ to open YouTube Music in ${BROWSER_NAMES[openable[0]]}`]
                         : needsTab

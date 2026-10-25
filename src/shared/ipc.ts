@@ -33,6 +33,20 @@ export const IPC = {
     startRadio: 'player:start-radio',
     /** renderer → main (invoke): start a radio from a search result. */
     startRadioFromSong: 'player:start-radio-from-song',
+    /** renderer → main: open the setup window, or bring it forward. */
+    setupShow: 'setup:show',
+    /** renderer → main (invoke): installed browsers and the ones chosen in setup. */
+    setupGet: 'setup:get',
+    /** renderer → main (invoke): save which browsers Music Bar may use. */
+    setupSetBrowsers: 'setup:set-browsers',
+    /** renderer → main (invoke): where one browser stands; may trigger macOS's permission prompt. */
+    setupCheck: 'setup:check',
+    /** renderer → main (invoke): launch a browser. */
+    setupOpenBrowser: 'setup:open-browser',
+    /** renderer → main (invoke): open System Settings → Privacy & Security → Automation. */
+    setupOpenAutomationSettings: 'setup:open-automation-settings',
+    /** renderer → main: close the setup window and show the launcher. */
+    setupFinish: 'setup:finish',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -76,6 +90,21 @@ export interface Track {
  * - error: anything else; see message
  */
 export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'error'
+
+/** A browser's state during setup: as above, or not open, so it can't be checked yet. */
+export type BrowserSetupState = BrowserState | 'not-running'
+
+export interface InstalledBrowser {
+    browser: BrowserName
+    /** The browser's app icon as a data: URL. */
+    icon: string | null
+}
+
+export interface SetupInfo {
+    installed: InstalledBrowser[]
+    /** Browsers chosen in setup; null before setup. */
+    chosen: BrowserName[] | null
+}
 
 export interface BrowserStatus {
     browser: BrowserName
@@ -129,4 +158,11 @@ export interface MusicBarApi {
     playNext(song: SearchSong): Promise<void>
     startRadio(source: TrackSource): Promise<void>
     startRadioFromSong(song: SearchSong): Promise<void>
+    showSetup(): void
+    getSetup(): Promise<SetupInfo>
+    setBrowsers(browsers: BrowserName[]): Promise<void>
+    checkBrowser(browser: BrowserName): Promise<BrowserSetupState>
+    openBrowser(browser: BrowserName): Promise<void>
+    openAutomationSettings(): Promise<void>
+    finishSetup(): void
 }

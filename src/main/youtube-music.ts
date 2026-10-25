@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import type { BrowserName, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserSetupState, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import { getSettings } from './settings'
 
 // Talks to YouTube Music by running JavaScript inside its tab through the
 // browser's AppleScript `execute javascript` command. This works on background
@@ -66,18 +67,36 @@ const CONTROL_SELECTORS: Record<PlayerControl, string> = {
     next: '.next-button',
 }
 
-const installed = BROWSERS.filter((name) =>
-    [join('/Applications', `${name}.app`), join(homedir(), 'Applications', `${name}.app`)].some(existsSync),
+// Where each supported browser is installed, if it is.
+const appPaths = new Map(
+    BROWSERS.flatMap((name) => {
+        const path = [join('/Applications', `${name}.app`), join(homedir(), 'Applications', `${name}.app`)].find(existsSync)
+        return path ? [[name, path] as const] : []
+    }),
 )
+
+/** Supported browsers on this Mac, with where each is installed. */
+export function installedBrowsers(): { browser: BrowserName; path: string }[] {
+    return [...appPaths].map(([browser, path]) => ({ browser, path }))
+}
+
+/**
+ * The browsers Music Bar talks to: the ones chosen in setup that are still
+ * installed. Nothing before setup, so no browser gets a permission prompt
+ * the user didn't ask for.
+ */
+function enabledBrowsers(): BrowserName[] {
+    return (getSettings().browsers ?? []).filter((browser) => appPaths.has(browser))
+}
 
 /** Quotes a string as an AppleScript string literal. */
 function asString(value: string): string {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
-function runAppleScript(script: string): Promise<string> {
+function runAppleScript(script: string, timeoutMs = 10_000): Promise<string> {
     return new Promise((resolve, reject) => {
-        execFile('osascript', ['-e', script], { timeout: 10_000 }, (error, stdout, stderr) => {
+        execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
             if (error) reject(new Error(stderr.trim() || error.message))
             else resolve(stdout.trim())
         })
@@ -143,7 +162,7 @@ function follow(track: Track): Track {
     return track
 }
 
-async function readBrowser(browser: BrowserName): Promise<BrowserRead> {
+async function readBrowser(browser: BrowserName, timeoutMs?: number): Promise<BrowserRead> {
     const now = Date.now()
     const skipIds = [...inactiveUntil]
         .filter(([key, retryAt]) => key.startsWith(`${browser}:`) && retryAt > now)
@@ -197,7 +216,7 @@ return out`
 
     let output: string
     try {
-        output = await runAppleScript(script)
+        output = await runAppleScript(script, timeoutMs)
     } catch (error) {
         // Failing as a whole (e.g. not authorized) means the browser is open:
         // the running check itself needs no permission.
@@ -268,8 +287,22 @@ function browserStatus({ browser, results, probe }: BrowserRead): BrowserStatus 
     return { browser, state: 'no-tab' }
 }
 
+// A setup check can sit on macOS's permission prompt until the user answers
+// it, and killing osascript early would cut the prompt short.
+const PERMISSION_PROMPT_TIMEOUT_MS = 120_000
+
+/**
+ * Where one browser stands for setup. Its first check is what makes macOS
+ * ask the user to let Music Bar control it.
+ */
+export async function checkBrowser(browser: BrowserName): Promise<BrowserSetupState> {
+    if (!appPaths.has(browser)) throw new Error('Unsupported browser')
+    const read = await readBrowser(browser, PERMISSION_PROMPT_TIMEOUT_MS)
+    return read.running ? browserStatus(read).state : 'not-running'
+}
+
 export async function getNowPlaying(): Promise<NowPlaying> {
-    const reads = await Promise.all(installed.map(readBrowser))
+    const reads = await Promise.all(enabledBrowsers().map((browser) => readBrowser(browser)))
     // The browser last played from comes first, for "open YouTube Music in…".
     const browsers = reads
         .filter((read) => read.running)
@@ -743,7 +776,7 @@ const OPEN_TAB_POLL_MS = 100
  * background. A browser with no windows gets a new one, which stays.
  */
 export async function openYouTubeMusic(browser: BrowserName, afterTabMade?: () => Promise<void>): Promise<void> {
-    if (!installed.includes(browser)) throw new Error('Unsupported browser')
+    if (!enabledBrowsers().includes(browser)) throw new Error('Unsupported browser')
     await enqueue(async () => {
         const created = await runAppleScript(`
 tell application ${asString(browser)}

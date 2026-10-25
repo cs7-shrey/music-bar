@@ -1,0 +1,383 @@
+import { useEffect, useState, type ReactNode } from 'react'
+import { Check } from 'lucide-react'
+import type { BrowserName, BrowserSetupState, InstalledBrowser } from '../shared/ipc'
+import { BROWSER_NAMES } from './now-playing'
+import markUrl from '../../assets/mark.svg'
+
+// The setup window: pick the browsers Music Bar may use, then walk each one
+// through opening it, allowing Automation, and turning on JavaScript from
+// Apple Events, with live checks.
+
+// Pause between rounds of checks.
+const CHECK_INTERVAL_MS = 1500
+// A check this slow is waiting on macOS's permission prompt.
+const PROMPT_WAIT_MS = 1200
+
+interface BrowserCheck {
+    state: BrowserSetupState | 'failed' | null
+    /** When the check in flight started; null when none is. */
+    since: number | null
+}
+
+const isReady = (state: BrowserCheck['state']) => state === 'connected' || state === 'no-tab'
+// Not yet allowed (or not known to be), so a check may raise macOS's
+// permission prompt. Once allowed, a slow check is just slow.
+const mayPrompt = (state: BrowserCheck['state']) =>
+    state === null || state === 'not-running' || state === 'needs-permission'
+
+export default function Setup() {
+    const [installed, setInstalled] = useState<InstalledBrowser[] | null>(null)
+    const [chosen, setChosen] = useState<BrowserName[]>([])
+    const [step, setStep] = useState<'choose' | 'connect'>('choose')
+    // Checks run only on the connect step; choosing a browser asks nothing yet.
+    const checks = useBrowserChecks(step === 'connect' ? chosen : [])
+    // Music Bar works once one browser is ready; the rest can wait.
+    const anyReady = chosen.some((browser) => isReady(checks[browser]?.state ?? null))
+
+    useEffect(() => {
+        void window.musicBar.getSetup().then((info) => {
+            setInstalled(info.installed)
+            const available = info.installed.map((item) => item.browser)
+            // A single browser needs no choosing.
+            setChosen(info.chosen?.filter((b) => available.includes(b)) ?? (available.length === 1 ? available : []))
+        })
+    }, [])
+
+    const toggle = (browser: BrowserName) =>
+        setChosen((current) => (current.includes(browser) ? current.filter((b) => b !== browser) : [...current, browser]))
+
+    const next = async () => {
+        // Kept in the order they're listed, not the order they were clicked.
+        const ordered = (installed ?? []).map((item) => item.browser).filter((b) => chosen.includes(b))
+        await window.musicBar.setBrowsers(ordered)
+        setChosen(ordered)
+        setStep('connect')
+    }
+
+    return (
+        <div className="flex h-full flex-col bg-base text-white">
+            {/* Room for the traffic lights, and something to drag the window by. */}
+            <div className="h-11 shrink-0 [-webkit-app-region:drag]" />
+            <div className="flex min-h-0 flex-1 flex-col px-9 pb-8">
+                <header className="flex flex-col items-start gap-4">
+                    <img src={markUrl} alt="" className="size-14" draggable={false} />
+                    <div className="flex flex-col gap-1.5">
+                        <h1 className="text-[26px] leading-tight font-extrabold tracking-tight">
+                            {step === 'choose' ? 'Welcome to Music Bar' : 'Connect your browsers'}
+                        </h1>
+                        <p className="text-sm font-medium text-subdued">
+                            {step === 'choose' ? (
+                                <>
+                                    Control YouTube Music from anywhere with <Keys>⌘⇧Space</Keys>. Choose the browsers you
+                                    play it in.
+                                </>
+                            ) : (
+                                'Music Bar controls YouTube Music through your browser. Each one needs a one-time setup.'
+                            )}
+                        </p>
+                    </div>
+                </header>
+
+                {step === 'choose' ? (
+                    <ChooseBrowsers installed={installed} chosen={chosen} onToggle={toggle} />
+                ) : (
+                    <ConnectBrowsers browsers={chosen} icons={installed ?? []} checks={checks} />
+                )}
+
+                <footer className="mt-6 flex shrink-0 items-center justify-between gap-4">
+                    {step === 'choose' ? (
+                        <>
+                            <span className="text-xs font-medium text-faint">You can change this later from the menu bar.</span>
+                            <PrimaryButton disabled={chosen.length === 0} onClick={() => void next()}>
+                                Continue
+                            </PrimaryButton>
+                        </>
+                    ) : (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setStep('choose')}
+                                className="rounded-full px-3 py-2 text-sm font-bold text-subdued transition hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+                            >
+                                Back
+                            </button>
+                            <span className="flex items-center gap-4">
+                                {!anyReady && (
+                                    <button
+                                        type="button"
+                                        onClick={() => window.musicBar.finishSetup()}
+                                        className="rounded-full px-3 py-2 text-sm font-bold text-subdued transition hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+                                    >
+                                        Skip for now
+                                    </button>
+                                )}
+                                <PrimaryButton disabled={!anyReady} onClick={() => window.musicBar.finishSetup()}>
+                                    Done
+                                </PrimaryButton>
+                            </span>
+                        </>
+                    )}
+                </footer>
+            </div>
+        </div>
+    )
+}
+
+function ChooseBrowsers({
+    installed,
+    chosen,
+    onToggle,
+}: {
+    installed: InstalledBrowser[] | null
+    chosen: BrowserName[]
+    onToggle: (browser: BrowserName) => void
+}) {
+    if (installed === null) return <div className="flex-1" />
+    if (installed.length === 0) {
+        return (
+            <p className="mt-8 flex-1 text-sm font-medium text-subdued">
+                Music Bar works with Brave, Chrome and Helium. Install one of them, then open Music Bar again.
+            </p>
+        )
+    }
+    return (
+        <div className="mt-8 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+            {installed.map(({ browser, icon }) => {
+                const on = chosen.includes(browser)
+                return (
+                    <button
+                        key={browser}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => onToggle(browser)}
+                        className={`flex h-16 shrink-0 items-center gap-4 rounded-xl px-4 text-left transition focus-visible:outline-2 focus-visible:outline-white ${
+                            on ? 'bg-highlight ring-1 ring-white/15' : 'bg-elevated hover:bg-highlight'
+                        }`}
+                    >
+                        <BrowserIcon icon={icon} />
+                        <span className="flex-1 text-[15px] font-bold">{BROWSER_NAMES[browser]}</span>
+                        <span
+                            className={`flex size-6 items-center justify-center rounded-full transition ${
+                                on ? 'bg-accent text-white' : 'ring-2 ring-white/25 ring-inset'
+                            }`}
+                        >
+                            {on && <Check className="size-3.5" strokeWidth={3.5} />}
+                        </span>
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
+
+/**
+ * Checks the chosen browsers one after another, round after round. One at a
+ * time, so macOS's permission prompts come one by one too: a check sits on
+ * its browser's prompt until the user answers it.
+ */
+function useBrowserChecks(browsers: BrowserName[]): Record<string, BrowserCheck> {
+    const [checks, setChecks] = useState<Record<string, BrowserCheck>>({})
+    const key = browsers.join('|')
+
+    useEffect(() => {
+        let stopped = false
+        const set = (browser: BrowserName, check: Partial<BrowserCheck>) =>
+            setChecks((current) => ({
+                ...current,
+                [browser]: { ...(current[browser] ?? { state: null, since: null }), ...check },
+            }))
+        // Each browser's last result, for telling whether a check could have prompted.
+        const last: Partial<Record<BrowserName, BrowserCheck['state']>> = {}
+        const run = async () => {
+            while (!stopped) {
+                for (const browser of browsers) {
+                    if (stopped) return
+                    const started = Date.now()
+                    set(browser, { since: started })
+                    let state: BrowserCheck['state']
+                    try {
+                        state = await window.musicBar.checkBrowser(browser)
+                    } catch {
+                        state = 'failed'
+                    }
+                    set(browser, { state, since: null })
+                    // The check sat on macOS's permission prompt, and macOS
+                    // doesn't hand focus back once it's answered.
+                    if (Date.now() - started > PROMPT_WAIT_MS && mayPrompt(last[browser] ?? null)) {
+                        window.musicBar.showSetup()
+                    }
+                    last[browser] = state
+                }
+                await new Promise((resolve) => setTimeout(resolve, CHECK_INTERVAL_MS))
+            }
+        }
+        void run()
+        return () => {
+            stopped = true
+        }
+        // Keyed on the names, not the array, so a re-render doesn't restart the loop.
+    }, [key])
+
+    return checks
+}
+
+/** Re-renders now and then while something waits on the clock. */
+function useTick(active: boolean): void {
+    const [, setTick] = useState(0)
+    useEffect(() => {
+        if (!active) return
+        const timer = setInterval(() => setTick((tick) => tick + 1), 400)
+        return () => clearInterval(timer)
+    }, [active])
+}
+
+function ConnectBrowsers({
+    browsers,
+    icons,
+    checks,
+}: {
+    browsers: BrowserName[]
+    icons: InstalledBrowser[]
+    checks: Record<string, BrowserCheck>
+}) {
+    useTick(Object.values(checks).some((check) => check.since !== null))
+    return (
+        <div className="mt-8 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+            {browsers.map((browser) => (
+                <BrowserCard
+                    key={browser}
+                    browser={browser}
+                    icon={icons.find((item) => item.browser === browser)?.icon ?? null}
+                    check={checks[browser] ?? { state: null, since: null }}
+                />
+            ))}
+        </div>
+    )
+}
+
+type StepStatus = 'done' | 'current' | 'waiting'
+
+function BrowserCard({ browser, icon, check }: { browser: BrowserName; icon: string | null; check: BrowserCheck }) {
+    const name = BROWSER_NAMES[browser]
+    const { state } = check
+    const ready = isReady(state)
+    // A slow check of a browser that hasn't been allowed yet is sitting on
+    // macOS's permission prompt.
+    const promptShowing = check.since !== null && Date.now() - check.since > PROMPT_WAIT_MS && mayPrompt(state)
+
+    const opened: StepStatus = promptShowing
+        ? 'done'
+        : state === null
+          ? 'waiting'
+          : state === 'not-running'
+            ? 'current'
+            : 'done'
+    const allowed: StepStatus =
+        opened !== 'done' ? 'waiting' : state === 'needs-permission' || promptShowing ? 'current' : 'done'
+    const scripting: StepStatus = allowed !== 'done' ? 'waiting' : ready ? 'done' : 'current'
+
+    return (
+        <section className="flex shrink-0 flex-col gap-3 rounded-xl bg-elevated p-4">
+            <div className="flex items-center gap-3">
+                <BrowserIcon icon={icon} />
+                <span className="flex-1 text-[15px] font-bold">{name}</span>
+                <span
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                        ready ? 'bg-white/10 text-white' : 'bg-white/[0.06] text-subdued'
+                    }`}
+                >
+                    {ready ? 'Ready' : state === null ? 'Checking…' : 'Needs setup'}
+                </span>
+            </div>
+            <ol className="flex flex-col gap-2.5 pl-1">
+                <Step status={opened} title={`Open ${name}`}>
+                    <SmallButton onClick={() => void window.musicBar.openBrowser(browser)}>Open {name}</SmallButton>
+                </Step>
+                <Step status={allowed} title={`Allow Music Bar to control ${name}`}>
+                    {promptShowing ? (
+                        <>macOS is asking. Click Allow (or OK) in its prompt.</>
+                    ) : (
+                        <>
+                            It was turned down. Turn on {name} under Music Bar in Privacy & Security → Automation.
+                            <SmallButton onClick={() => void window.musicBar.openAutomationSettings()}>
+                                Open System Settings
+                            </SmallButton>
+                        </>
+                    )}
+                </Step>
+                <Step status={scripting} title="Allow JavaScript from Apple Events">
+                    {state === 'failed' || state === 'error' ? (
+                        <>Music Bar couldn't reach {name}. Quit and reopen it, then check again.</>
+                    ) : (
+                        <>
+                            In {name}’s menu bar, choose <Keys>View → Developer → Allow JavaScript from Apple Events</Keys>.
+                        </>
+                    )}
+                </Step>
+            </ol>
+        </section>
+    )
+}
+
+function Step({ status, title, children }: { status: StepStatus; title: string; children: ReactNode }) {
+    return (
+        <li className="flex gap-3">
+            <span
+                className={`mt-px flex size-5 shrink-0 items-center justify-center rounded-full ${
+                    status === 'done'
+                        ? 'bg-accent text-white'
+                        : status === 'current'
+                          ? 'ring-2 ring-white ring-inset'
+                          : 'ring-2 ring-white/15 ring-inset'
+                }`}
+            >
+                {status === 'done' && <Check className="size-3" strokeWidth={3.5} />}
+            </span>
+            <div className="flex min-w-0 flex-col gap-1.5">
+                <span className={`text-sm font-semibold ${status === 'waiting' ? 'text-faint' : 'text-white'}`}>{title}</span>
+                {status === 'current' && (
+                    <div className="flex flex-col items-start gap-2 text-[13px] leading-snug font-medium text-subdued">
+                        {children}
+                    </div>
+                )}
+            </div>
+        </li>
+    )
+}
+
+function BrowserIcon({ icon }: { icon: string | null }) {
+    return icon ? (
+        <img src={icon} alt="" className="size-9 shrink-0" draggable={false} />
+    ) : (
+        <span className="size-9 shrink-0 rounded-lg bg-highlight" />
+    )
+}
+
+function PrimaryButton({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
+    return (
+        <button
+            type="button"
+            disabled={disabled}
+            onClick={onClick}
+            className="rounded-full bg-accent px-7 py-3 text-sm font-bold text-white transition hover:scale-[1.03] hover:bg-accent-bright focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:pointer-events-none disabled:opacity-40"
+        >
+            {children}
+        </button>
+    )
+}
+
+function SmallButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-white"
+        >
+            {children}
+        </button>
+    )
+}
+
+function Keys({ children }: { children: ReactNode }) {
+    return <span className="font-semibold whitespace-nowrap text-white">{children}</span>
+}

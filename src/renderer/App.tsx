@@ -272,6 +272,7 @@ export default function App() {
                     title={BROWSER_NAMES[status.browser]}
                     subtitle={describeBrowser(status)}
                     badge={BROWSER_STATES[status.state].label}
+                    onSelect={() => window.musicBar.showSetup()}
                 />
             ))}
         </Command.Group>
@@ -347,7 +348,7 @@ export default function App() {
                             ) : (
                                 <ListNote>
                                     {nowPlaying.browsers.length === 0
-                                        ? 'Open Brave, Chrome or Helium to search'
+                                        ? 'Open your browser to search'
                                         : 'Set up a browser to search: View → Developer → Allow JavaScript from Apple Events'}
                                 </ListNote>
                             )

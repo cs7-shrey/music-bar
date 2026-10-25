@@ -40,6 +40,21 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   a YT Music tab so requests carry the user's session. Songs and videos are
   told apart from albums/playlists/profiles by `videoId` and
   `musicVideoType`, never by the localized "Song"/"Album" labels.
+- `src/main/settings.ts` — user settings as JSON in the app's data folder
+  (`~/Library/Application Support/Music Bar/settings.json`). `browsers` is the
+  list chosen in setup; Music Bar only ever talks to those browsers, and to
+  none until setup has run, so nobody gets permission prompts they didn't
+  ask for.
+- `src/main/setup-window.ts` + `src/renderer/setup.tsx` — first-run setup:
+  choose browsers, then a live checklist per browser (open it, allow
+  Automation, allow JavaScript from Apple Events). A normal window, not the
+  launcher panel, because setup sends the user to browser menus and macOS
+  prompts. It shows a Dock icon while open. Checks run one browser at a time
+  so permission prompts come one by one. Until browsers are chosen, every
+  way into the app opens setup; afterwards it's under "Choose Browsers…" in
+  the menu bar menu. To test a first run: quit Music Bar, then
+  `rm ~/Library/Application\ Support/Music\ Bar/settings.json` and
+  `tccutil reset AppleEvents dev.shrey.music-bar`.
 - `src/main/frontmost-app.ts` — reads and restores the frontmost app through
   AppKit (JXA), no Automation permission needed. Opening YouTube Music brings
   the browser forward; this puts the user's app back in front.
@@ -59,6 +74,10 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - The launcher hides on blur and on Esc. Hiding through `hideLauncher()` also
   calls `app.hide()` so focus returns to the previous app.
 - Renderer code never imports Electron; go through `window.musicBar`.
+- One renderer serves both windows: `main.tsx` renders setup for `#setup`,
+  else the launcher.
+- Don't use `app.getFileIcon`: it crashes Electron on macOS 26. Use
+  `nativeImage.createThumbnailFromPath` for app icons.
 
 ## Commits
 

@@ -1,4 +1,5 @@
-import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron'
+import { execFile } from 'child_process'
+import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron'
 import { join } from 'path'
 import { IPC, type BrowserName, type PlayerControl, type TrackSource } from '../shared/ipc'
 import {
@@ -13,6 +14,8 @@ import * as youtubeMusic from './youtube-music'
 import * as youtubeMusicSearch from './youtube-music-search'
 import { fetchArtwork } from './artwork'
 import { activateApp, frontmostApp } from './frontmost-app'
+import { getSettings, updateSettings } from './settings'
+import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 
@@ -22,11 +25,21 @@ if (!app.requestSingleInstanceLock()) {
     app.quit()
 }
 
-app.on('second-instance', () => showLauncher())
+// Until browsers are chosen, every way into Music Bar leads to setup.
+const needsSetup = () => getSettings().browsers === null
+
+function openMusicBar(): void {
+    // An open setup window comes forward, e.g. on a click on the Dock icon
+    // it adds.
+    if (needsSetup() || isSetupOpen()) showSetup()
+    else showLauncher()
+}
+
+app.on('second-instance', openMusicBar)
 // Opening the app again from Spotlight, Finder or Launchpad while it runs
 // reopens it rather than starting a second copy. Show the launcher, like
 // Raycast, instead of quietly taking focus with nothing on screen.
-app.on('activate', () => showLauncher())
+app.on('activate', openMusicBar)
 
 function createTray(): void {
     // A template image: macOS tints it for light and dark menu bars and picks
@@ -39,7 +52,8 @@ function createTray(): void {
     tray.setToolTip('Music Bar')
     tray.setContextMenu(
         Menu.buildFromTemplate([
-            { label: 'Open Music Bar', accelerator: SHORTCUT, click: () => showLauncher() },
+            { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
+            { label: 'Choose Browsers…', click: showSetup },
             { type: 'separator' },
             { label: 'Quit Music Bar', role: 'quit' },
         ]),
@@ -61,9 +75,11 @@ app.whenReady().then(() => {
 
     createLauncherWindow()
     createTray()
-    // Opening the app shows the launcher. Not in `pnpm dev`, which restarts
-    // the app on every main-process change.
-    if (app.isPackaged) showLauncher()
+    // Opening the app shows setup the first time, then the launcher. Not the
+    // launcher in `pnpm dev`, which restarts the app on every main-process
+    // change.
+    if (needsSetup()) showSetup()
+    else if (app.isPackaged) showLauncher()
 
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
     ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())
@@ -91,6 +107,35 @@ app.whenReady().then(() => {
         holdThroughBlur(15_000)
         return youtubeMusic.openYouTubeMusic(browser, returnFocus).finally(() => holdThroughBlur(0))
     })
+    ipcMain.on(IPC.setupShow, () => {
+        hideLauncher()
+        showSetup()
+    })
+    ipcMain.handle(IPC.setupGet, async () => ({
+        installed: await Promise.all(
+            youtubeMusic.installedBrowsers().map(async ({ browser, path }) => ({
+                browser,
+                // Not app.getFileIcon: it crashes Electron on macOS 26.
+                icon: await nativeImage
+                    .createThumbnailFromPath(path, { width: 72, height: 72 })
+                    .then((image) => image.toDataURL())
+                    .catch(() => null),
+            })),
+        ),
+        chosen: getSettings().browsers,
+    }))
+    ipcMain.handle(IPC.setupSetBrowsers, (_event, browsers: BrowserName[]) => updateSettings({ browsers }))
+    ipcMain.handle(IPC.setupCheck, (_event, browser: BrowserName) => youtubeMusic.checkBrowser(browser))
+    ipcMain.handle(IPC.setupOpenBrowser, (_event, browser: BrowserName) => {
+        if (!youtubeMusic.installedBrowsers().some((installed) => installed.browser === browser)) return
+        execFile('open', ['-a', browser])
+    })
+    ipcMain.handle(IPC.setupOpenAutomationSettings, () =>
+        shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'),
+    )
+    ipcMain.on(IPC.setupFinish, () => {
+        void closeSetup().then(showLauncher)
+    })
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
@@ -99,7 +144,7 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.startRadio, (_event, source: TrackSource) => youtubeMusic.startRadio(source))
     ipcMain.handle(IPC.startRadioFromSong, (_event, videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 
-    if (!globalShortcut.register(SHORTCUT, toggleLauncher)) {
+    if (!globalShortcut.register(SHORTCUT, () => (needsSetup() ? showSetup() : toggleLauncher()))) {
         console.warn(`[music-bar] could not register ${SHORTCUT}; another app may own it`)
     }
 })
