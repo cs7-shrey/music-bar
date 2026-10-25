@@ -1,4 +1,5 @@
 import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron'
+import { join } from 'path'
 import { IPC, type BrowserName, type PlayerControl, type TrackSource } from '../shared/ipc'
 import {
     createLauncherWindow,
@@ -24,9 +25,13 @@ if (!app.requestSingleInstanceLock()) {
 app.on('second-instance', () => showLauncher())
 
 function createTray(): void {
-    // Text-only status item until we have a proper template icon.
-    tray = new Tray(nativeImage.createEmpty())
-    tray.setTitle('♫')
+    // A template image: macOS tints it for light and dark menu bars and picks
+    // trayTemplate@2x.png on Retina screens. Packaged builds carry it in
+    // Resources (extraResource in forge.config.ts).
+    const assets = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'assets')
+    const icon = nativeImage.createFromPath(join(assets, 'trayTemplate.png'))
+    icon.setTemplateImage(true)
+    tray = new Tray(icon)
     tray.setToolTip('Music Bar')
     tray.setContextMenu(
         Menu.buildFromTemplate([

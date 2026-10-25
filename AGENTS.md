@@ -12,6 +12,7 @@ Use **pnpm** for everything. Do not use npm or yarn, and do not commit a
 - `pnpm dev` — run the app with Vite HMR (Electron Forge)
 - `pnpm typecheck` — typecheck main/preload and renderer
 - `pnpm build` / `pnpm make` — package the app / build a zip
+- `pnpm icons` — regenerate the app icon and menu bar icon from `assets/note.svg`
 
 `.npmrc` sets `node-linker=hoisted` because Electron Forge's packager needs a
 flat `node_modules`. Electron 44 downloads its binary on first launch, not at
@@ -46,6 +47,10 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/shared/` — IPC channel names and the `MusicBarApi` type, shared by all
   processes. Add every new IPC channel here.
 - `src/renderer/` — the launcher UI.
+- `assets/` — `note.svg` is the logo's source. `scripts/build-icons.mjs` turns
+  it into `icon.icns` (app icon on Apple's rounded tile) and
+  `trayTemplate.png` / `@2x` (menu bar template image). The generated files
+  are committed; rerun `pnpm icons` after changing `note.svg`.
 
 ## Conventions
 

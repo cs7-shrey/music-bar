@@ -1,0 +1,89 @@
+// Builds the app icon and the menu bar icon from assets/note.svg.
+//
+//   pnpm icons
+//
+// Writes assets/icon.svg + assets/icon.icns (app icon on Apple's rounded
+// tile) and assets/trayTemplate.svg + trayTemplate.png / @2x.png (black on
+// transparent, which macOS tints for light and dark menu bars).
+// Needs macOS for iconutil.
+
+import { execFileSync } from 'child_process'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { Resvg } from '@resvg/resvg-js'
+
+const ASSETS = join(import.meta.dirname, '..', 'assets')
+
+// assets/note.svg, in drawing order: the note's body (stem, flag and head as
+// one solid shape), the inside of the flag, the tick in the flag, the dot.
+const source = readFileSync(join(ASSETS, 'note.svg'), 'utf8')
+const [body, flagInside, tick] = [...source.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1])
+const [, cx, cy, r] = source.match(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/).map(Number)
+const [, noteWidth, noteHeight] = source.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/).map(Number)
+const dot = `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`
+
+// Places the note centered in a square canvas, `width` units wide.
+function placeNote(canvas, width) {
+    const scale = width / noteWidth
+    const x = (canvas - noteWidth * scale) / 2
+    const y = (canvas - noteHeight * scale) / 2
+    return `translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${scale.toFixed(5)})`
+}
+
+// App icon: Apple's macOS grid, an 824 tile with 185 corners on a 1024
+// canvas, plus the standard soft shadow under it.
+const NOTE_SHARE_OF_TILE = 0.52
+const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+    <defs>
+        <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#1c1c1e"/>
+            <stop offset="1" stop-color="#050505"/>
+        </linearGradient>
+        <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+            <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.04"/>
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0.08"/>
+        </linearGradient>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="12"/>
+        </filter>
+    </defs>
+    <rect x="108" y="118" width="808" height="808" rx="185" fill="#000000" opacity="0.4" filter="url(#shadow)"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+    <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#edge)" stroke-width="3"/>
+    <g transform="${placeNote(1024, 824 * NOTE_SHARE_OF_TILE)}">
+        <path d="${body} ${flagInside}" fill="#f2f2f2" fill-rule="evenodd"/>
+        <path d="${tick}" fill="#f2f2f2"/>
+        <path d="${dot}" fill="#c51234"/>
+    </g>
+</svg>
+`
+
+// Menu bar icon: one solid shape, with the flag's inside and the dot cut
+// out. The tick is dropped; it's under a pixel at this size.
+const TRAY_SIZE = 18
+const tray = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TRAY_SIZE} ${TRAY_SIZE}" width="${TRAY_SIZE}" height="${TRAY_SIZE}">
+    <g transform="${placeNote(TRAY_SIZE, 16 * (noteWidth / noteHeight))}">
+        <path d="${body} ${flagInside} ${dot}" fill="#000000" fill-rule="evenodd"/>
+    </g>
+</svg>
+`
+
+const render = (svg, size) => new Resvg(svg, { fitTo: { mode: 'width', value: size } }).render().asPng()
+
+writeFileSync(join(ASSETS, 'icon.svg'), icon)
+writeFileSync(join(ASSETS, 'trayTemplate.svg'), tray)
+writeFileSync(join(ASSETS, 'trayTemplate.png'), render(tray, TRAY_SIZE))
+writeFileSync(join(ASSETS, 'trayTemplate@2x.png'), render(tray, TRAY_SIZE * 2))
+
+const iconset = join(tmpdir(), 'music-bar-icon.iconset')
+rmSync(iconset, { recursive: true, force: true })
+mkdirSync(iconset)
+for (const size of [16, 32, 128, 256, 512]) {
+    writeFileSync(join(iconset, `icon_${size}x${size}.png`), render(icon, size))
+    writeFileSync(join(iconset, `icon_${size}x${size}@2x.png`), render(icon, size * 2))
+}
+execFileSync('iconutil', ['-c', 'icns', iconset, '-o', join(ASSETS, 'icon.icns')])
+rmSync(iconset, { recursive: true })
+console.log('Wrote assets/icon.icns, assets/trayTemplate.png and @2x')

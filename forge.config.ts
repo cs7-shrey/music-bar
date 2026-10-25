@@ -7,6 +7,9 @@ const config: ForgeConfig = {
         name: 'Music Bar',
         appBundleId: 'dev.shrey.music-bar',
         asar: true,
+        // Generated from assets/note.svg by `pnpm icons`.
+        icon: 'assets/icon',
+        extraResource: ['assets/trayTemplate.png', 'assets/trayTemplate@2x.png'],
         extendInfo: {
             // Menu-bar style app: no Dock icon, no app switcher entry.
             LSUIElement: true,

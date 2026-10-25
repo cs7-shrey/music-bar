@@ -9,7 +9,8 @@
         "dev": "electron-forge start",
         "build": "electron-forge package",
         "make": "electron-forge make",
-        "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+        "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+        "icons": "node scripts/build-icons.mjs"
     },
     "dependencies": {
         "@fontsource-variable/figtree": "^5.3.0",
@@ -24,6 +25,7 @@
         "@electron-forge/maker-zip": "^7.11.1",
         "@electron-forge/plugin-vite": "^7.11.1",
         "@electron-forge/shared-types": "^7.11.1",
+        "@resvg/resvg-js": "^2.6.2",
         "@tailwindcss/vite": "^4.1.12",
         "@types/node": "^25.0.7",
         "@types/react": "^19.1.11",
