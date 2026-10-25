@@ -3,7 +3,8 @@
 //   pnpm icons
 //
 // Writes assets/icon.svg + assets/icon.icns (app icon on Apple's rounded
-// tile) and assets/trayTemplate.svg + trayTemplate.png / @2x.png (black on
+// tile), assets/mark.svg (the note on a circle, for use inside the app) and
+// assets/trayTemplate.svg + trayTemplate.png / @2x.png (black on
 // transparent, which macOS tints for light and dark menu bars).
 // Needs macOS for iconutil.
 
@@ -60,6 +61,24 @@ const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" wi
 </svg>
 `
 
+// In-app mark (the launcher footer): the note on a dark circle, edge to edge
+// with no shadow, sized to read at 20px. The dot is cut out, as in the menu
+// bar icon.
+const mark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 824 824" width="824" height="824">
+    <defs>
+        <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2a2a2d"/>
+            <stop offset="1" stop-color="#0a0a0a"/>
+        </linearGradient>
+    </defs>
+    <circle cx="412" cy="412" r="412" fill="url(#tile)"/>
+    <circle cx="412" cy="412" r="398" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="28"/>
+    <g transform="${placeNote(824, 824 * 0.52)}">
+        <path d="${body} ${flagInside} ${dot}" fill="#f2f2f2" fill-rule="evenodd"/>
+    </g>
+</svg>
+`
+
 // Menu bar icon: one solid shape, with the flag's inside and the dot cut
 // out. The tick is dropped; it's under a pixel at this size.
 const TRAY_SIZE = 18
@@ -73,6 +92,7 @@ const tray = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TRAY_SIZE} 
 const render = (svg, size) => new Resvg(svg, { fitTo: { mode: 'width', value: size } }).render().asPng()
 
 writeFileSync(join(ASSETS, 'icon.svg'), icon)
+writeFileSync(join(ASSETS, 'mark.svg'), mark)
 writeFileSync(join(ASSETS, 'trayTemplate.svg'), tray)
 writeFileSync(join(ASSETS, 'trayTemplate.png'), render(tray, TRAY_SIZE))
 writeFileSync(join(ASSETS, 'trayTemplate@2x.png'), render(tray, TRAY_SIZE * 2))

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ExternalLink, Globe, Music2, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { ExternalLink, Globe, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
 import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
+import markUrl from '../../assets/mark.svg'
 
 const PLAY_PAUSE_COMMAND = 'Play or Pause'
 const LOOP_COMMAND = 'Loop Current Song'
@@ -386,9 +387,7 @@ export default function App() {
 
             <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.06] px-5 text-xs font-semibold text-subdued">
                 <span className="flex min-w-0 items-center gap-2">
-                    <span className="glass flex size-5 shrink-0 items-center justify-center rounded-full">
-                        <Music2 className="size-2.5 text-white" strokeWidth={2.5} />
-                    </span>
+                    <img src={markUrl} alt="" className="size-5 shrink-0" draggable={false} />
                     {notice ? (
                         <span className="truncate text-white">{notice}</span>
                     ) : footerProblem ? (
