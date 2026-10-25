@@ -81,6 +81,14 @@ export function holdThroughBlur(ms: number): void {
     ignoreBlurUntil = Date.now() + ms
 }
 
+/**
+ * Gives the keyboard back to the launcher after another app took it. The
+ * panel doesn't activate Music Bar, so the app in front stays in front.
+ */
+export function focusLauncher(): void {
+    if (window?.isVisible()) window.focus()
+}
+
 export function hideLauncher(): void {
     if (!window?.isVisible()) return
     window.hide()

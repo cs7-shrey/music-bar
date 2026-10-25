@@ -742,7 +742,7 @@ const OPEN_TAB_POLL_MS = 100
  * switches back. After that, play, skip and play now all load from the
  * background. A browser with no windows gets a new one, which stays.
  */
-export async function openYouTubeMusic(browser: BrowserName): Promise<void> {
+export async function openYouTubeMusic(browser: BrowserName, afterTabMade?: () => Promise<void>): Promise<void> {
     if (!installed.includes(browser)) throw new Error('Unsupported browser')
     await enqueue(async () => {
         const created = await runAppleScript(`
@@ -758,8 +758,9 @@ tell application ${asString(browser)}
     set active tab index of w to previousIndex
     return (id of w as text) & " " & (id of t as text) & " background"
 end tell`)
-        // Making a tab brings the browser forward. It stays there for now;
-        // returning focus to the app the user was in is a follow-up.
+        // Making a tab brings the browser forward; afterTabMade hands focus
+        // back to the app the user was in.
+        await afterTabMade?.()
         const [windowId, tabId, placement] = created.split(' ')
         const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
 

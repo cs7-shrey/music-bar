@@ -2,6 +2,7 @@ import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Tray } fr
 import { IPC, type BrowserName, type PlayerControl, type TrackSource } from '../shared/ipc'
 import {
     createLauncherWindow,
+    focusLauncher,
     hideLauncher,
     holdThroughBlur,
     showLauncher,
@@ -10,6 +11,7 @@ import {
 import * as youtubeMusic from './youtube-music'
 import * as youtubeMusicSearch from './youtube-music-search'
 import { fetchArtwork } from './artwork'
+import { activateApp, frontmostApp } from './frontmost-app'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 
@@ -64,12 +66,18 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.nowPlayingSetLoop, (_event, source: TrackSource, enabled: boolean) =>
         youtubeMusic.setLoop(source, enabled),
     )
-    ipcMain.handle(IPC.openYouTubeMusic, (_event, browser: BrowserName) => {
-        // The browser comes forward when the tab is made, and stays in front
-        // for now (handing focus back is a follow-up). The launcher stays up
-        // through that so the search results still show.
+    ipcMain.handle(IPC.openYouTubeMusic, async (_event, browser: BrowserName) => {
+        // The browser comes forward when the tab is made. The app the user
+        // was in goes back in front right after, and the launcher takes the
+        // keyboard again; it stays up through all that so the search results
+        // still show.
+        const previousApp = await frontmostApp()
+        const returnFocus = async () => {
+            if (previousApp && previousApp.pid !== process.pid) await activateApp(previousApp)
+            focusLauncher()
+        }
         holdThroughBlur(15_000)
-        return youtubeMusic.openYouTubeMusic(browser).finally(() => holdThroughBlur(0))
+        return youtubeMusic.openYouTubeMusic(browser, returnFocus).finally(() => holdThroughBlur(0))
     })
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
