@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Globe } from 'lucide-react'
+import { Globe, Keyboard } from 'lucide-react'
 import type { BrowserName, InstalledBrowser } from '../shared/ipc'
 import { BROWSER_NAMES } from './now-playing'
 import {
@@ -18,7 +18,10 @@ import markUrl from '../../assets/mark.svg'
 // as they're made.
 
 // Sidebar sections. Each new kind of setting gets its own.
-const SECTIONS = [{ id: 'browsers', label: 'Browsers', icon: Globe }] as const
+const SECTIONS = [
+    { id: 'browsers', label: 'Browsers', icon: Globe },
+    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+] as const
 
 type SectionId = (typeof SECTIONS)[number]['id']
 
@@ -65,7 +68,10 @@ export default function Settings() {
                 <div className="h-12 shrink-0 [-webkit-app-region:drag]" />
                 <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-10">
                     {/* Capped, so rows stay readable in a wide window. */}
-                    <div className="max-w-[640px]">{section === 'browsers' && <BrowsersSection />}</div>
+                    <div className="max-w-[640px]">
+                        {section === 'browsers' && <BrowsersSection />}
+                        {section === 'shortcuts' && <ShortcutsSection />}
+                    </div>
                 </div>
             </main>
         </div>
@@ -201,5 +207,75 @@ function Switch({
                 }`}
             />
         </button>
+    )
+}
+
+// Every shortcut, as the launcher and main process define them (SHORTCUT in
+// index.ts, SHORTCUTS and the key handlers in App.tsx). Not changeable yet.
+const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string[] }[] }[] = [
+    {
+        title: 'Anywhere',
+        shortcuts: [{ label: 'Open Music Bar', keys: ['⌘', '⇧', 'Space'] }],
+    },
+    {
+        title: 'Player',
+        shortcuts: [
+            { label: 'Previous', keys: ['⌘', 'H'] },
+            { label: 'Next', keys: ['⌘', 'L'] },
+            { label: 'Loop', keys: ['⌘', 'O'] },
+            { label: 'Start radio', keys: ['⌘', 'R'] },
+        ],
+    },
+    {
+        title: 'Search results',
+        shortcuts: [
+            { label: 'Play', keys: ['↵'] },
+            { label: 'Play next', keys: ['⇧', '↵'] },
+            { label: 'Start radio from song', keys: ['⌘', '↵'] },
+        ],
+    },
+    {
+        title: 'Launcher',
+        shortcuts: [
+            { label: 'Settings', keys: ['⌘', ','] },
+            { label: 'Back, clear or close', keys: ['esc'] },
+        ],
+    },
+]
+
+function ShortcutsSection() {
+    return (
+        <>
+            <SectionHeader title="Shortcuts" description="The keys Music Bar answers to." />
+            {SHORTCUT_GROUPS.map(({ title, shortcuts }) => (
+                <section key={title} className="mt-7">
+                    <h2 className="mb-2 text-xs font-bold tracking-wider text-faint uppercase">{title}</h2>
+                    <ul className="flex flex-col divide-y divide-white/[0.06] rounded-xl bg-elevated">
+                        {shortcuts.map(({ label, keys }) => (
+                            <li key={label} className="flex h-12 items-center justify-between gap-4 px-4">
+                                <span className="text-sm font-semibold">{label}</span>
+                                <ShortcutPill keys={keys} />
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            ))}
+        </>
+    )
+}
+
+/** Looks like the button for recording a shortcut, the way it will be once they can be changed. */
+function ShortcutPill({ keys }: { keys: string[] }) {
+    return (
+        <span className="flex cursor-default items-center gap-1 rounded-lg bg-white/[0.06] px-1.5 py-1 ring-1 ring-white/10 transition select-none ring-inset hover:bg-white/10">
+            {keys.map((key) => (
+                <kbd
+                    key={key}
+                    className="flex h-6 min-w-6 items-center justify-center rounded-md bg-white/10 px-1.5 font-sans text-xs font-bold text-white shadow-[inset_0_-1px_0_rgba(0,0,0,0.35)]"
+                >
+                    {key}
+                </kbd>
+            ))}
+        </span>
     )
 }
