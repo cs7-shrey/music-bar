@@ -1,2 +1,2 @@
 # Electron Forge's packager walks node_modules and needs a flat layout.
-node-linker=hoisted
+nodeLinker: hoisted
