@@ -299,6 +299,10 @@ export default function App() {
             // Results come from YouTube Music, so the list shows them as-is
             // instead of letting cmdk fuzzy-filter them against the input.
             shouldFilter={false}
+            // As in Raycast, the mouse doesn't move the selection; ↵ acts on
+            // what the arrow keys (or a click) chose. Hover gets its own,
+            // fainter highlight.
+            disablePointerSelection
             value={selected}
             onValueChange={setSelected}
             onKeyDown={handleKeyDown}
@@ -456,7 +460,7 @@ function CommandRow({
         <Command.Item
             value={value}
             onSelect={onSelect}
-            className={`group flex h-12 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08] ${muted ? 'opacity-50' : ''}`}
+            className={`group flex h-12 items-center gap-3 rounded-md px-2 data-[selected=false]:hover:bg-white/[0.04] data-[selected=true]:bg-white/[0.08] ${muted ? 'opacity-50' : ''}`}
         >
             <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-white [&>svg]:size-[18px]">
                 {icon}

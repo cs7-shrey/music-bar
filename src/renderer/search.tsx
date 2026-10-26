@@ -49,7 +49,7 @@ export function SearchRow({ query, label, onSelect }: { query: string; label: st
         <Command.Item
             value={searchValue(query)}
             onSelect={onSelect}
-            className="flex h-12 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08]"
+            className="flex h-12 items-center gap-3 rounded-md px-2 data-[selected=false]:hover:bg-white/[0.04] data-[selected=true]:bg-white/[0.08]"
         >
             <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-subdued">
                 <Search className="size-[18px]" strokeWidth={2.25} />
@@ -65,7 +65,7 @@ export function SongRow({ song, onSelect }: { song: SearchSong; onSelect: () => 
         <Command.Item
             value={songValue(song)}
             onSelect={onSelect}
-            className="group flex h-14 items-center gap-3 rounded-md px-2 data-[selected=true]:bg-white/[0.08]"
+            className="group flex h-14 items-center gap-3 rounded-md px-2 data-[selected=false]:hover:bg-white/[0.04] data-[selected=true]:bg-white/[0.08]"
         >
             <span className="relative size-10 shrink-0 overflow-hidden rounded">
                 {song.thumbnailUrl && !thumbnailFailed ? (
