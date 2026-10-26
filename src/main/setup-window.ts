@@ -1,10 +1,12 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { frontmostApp } from './frontmost-app'
+import { getSettings } from './settings'
 
 // The setup window: an ordinary window rather than the launcher panel, since
 // setup sends the user to their browser's menus and to macOS prompts, and the
-// launcher hides whenever it loses focus. Same renderer, routed by #setup.
+// launcher hides whenever it loses focus. Same renderer, routed by the hash:
+// #setup for the first run, #settings once browsers are chosen.
 
 const HANDOFF_TIMEOUT_MS = 1500
 
@@ -22,15 +24,18 @@ export function showSetup(): void {
         return
     }
 
+    const page = getSettings().browsers === null ? 'setup' : 'settings'
     window = new BrowserWindow({
-        width: 560,
-        height: 660,
+        // Setup is one narrow column. Settings has a sidebar of sections and
+        // room to grow.
+        ...(page === 'setup'
+            ? { width: 560, height: 660, resizable: false }
+            : { width: 820, height: 580, minWidth: 680, minHeight: 440 }),
         show: false,
-        resizable: false,
         minimizable: false,
         maximizable: false,
         fullscreenable: false,
-        title: 'Set Up Music Bar',
+        title: page === 'setup' ? 'Set Up Music Bar' : 'Music Bar Settings',
         titleBarStyle: 'hiddenInset',
         backgroundColor: '#121212',
         webPreferences: {
@@ -53,9 +58,9 @@ export function showSetup(): void {
     })
 
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-        void window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}#setup`)
+        void window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}#${page}`)
     } else {
-        void window.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), { hash: 'setup' })
+        void window.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), { hash: page })
     }
 }
 

@@ -35,7 +35,7 @@ export const IPC = {
     showTab: 'player:show-tab',
     /** renderer → main (invoke): start a radio from a search result. */
     startRadioFromSong: 'player:start-radio-from-song',
-    /** renderer → main: open the setup window, or bring it forward. */
+    /** renderer → main: open setup (or settings, once browsers are chosen), or bring it forward. */
     setupShow: 'setup:show',
     /** renderer → main (invoke): installed browsers and the ones chosen in setup. */
     setupGet: 'setup:get',

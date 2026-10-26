@@ -13,17 +13,21 @@ const CHECK_INTERVAL_MS = 1500
 // A check this slow is waiting on macOS's permission prompt.
 const PROMPT_WAIT_MS = 1200
 
-interface BrowserCheck {
+export interface BrowserCheck {
     state: BrowserSetupState | 'failed' | null
     /** When the check in flight started; null when none is. */
     since: number | null
 }
 
-const isReady = (state: BrowserCheck['state']) => state === 'connected' || state === 'no-tab'
+export const isReady = (state: BrowserCheck['state']) => state === 'connected' || state === 'no-tab'
 // Not yet allowed (or not known to be), so a check may raise macOS's
 // permission prompt. Once allowed, a slow check is just slow.
 const mayPrompt = (state: BrowserCheck['state']) =>
     state === null || state === 'not-running' || state === 'needs-permission'
+// A slow check of a browser that hasn't been allowed yet is sitting on
+// macOS's permission prompt.
+export const isPrompting = (check: BrowserCheck) =>
+    check.since !== null && Date.now() - check.since > PROMPT_WAIT_MS && mayPrompt(check.state)
 
 export default function Setup() {
     const [installed, setInstalled] = useState<InstalledBrowser[] | null>(null)
@@ -175,7 +179,7 @@ function ChooseBrowsers({
  * time, so macOS's permission prompts come one by one too: a check sits on
  * its browser's prompt until the user answers it.
  */
-function useBrowserChecks(browsers: BrowserName[]): Record<string, BrowserCheck> {
+export function useBrowserChecks(browsers: BrowserName[]): Record<string, BrowserCheck> {
     const [checks, setChecks] = useState<Record<string, BrowserCheck>>({})
     const key = browsers.join('|')
 
@@ -218,6 +222,8 @@ function useBrowserChecks(browsers: BrowserName[]): Record<string, BrowserCheck>
         // Keyed on the names, not the array, so a re-render doesn't restart the loop.
     }, [key])
 
+    // Keeps "macOS is asking" current while a check waits on a prompt.
+    useTick(Object.values(checks).some((check) => check.since !== null))
     return checks
 }
 
@@ -240,7 +246,6 @@ function ConnectBrowsers({
     icons: InstalledBrowser[]
     checks: Record<string, BrowserCheck>
 }) {
-    useTick(Object.values(checks).some((check) => check.since !== null))
     return (
         <div className="mt-8 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
             {browsers.map((browser) => (
@@ -258,12 +263,36 @@ function ConnectBrowsers({
 type StepStatus = 'done' | 'current' | 'waiting'
 
 function BrowserCard({ browser, icon, check }: { browser: BrowserName; icon: string | null; check: BrowserCheck }) {
+    return (
+        <section className="flex shrink-0 flex-col gap-3 rounded-xl bg-elevated p-4">
+            <div className="flex items-center gap-3">
+                <BrowserIcon icon={icon} />
+                <span className="flex-1 text-[15px] font-bold">{BROWSER_NAMES[browser]}</span>
+                <StatusPill check={check} />
+            </div>
+            <SetupSteps browser={browser} check={check} />
+        </section>
+    )
+}
+
+export function StatusPill({ check }: { check: BrowserCheck }) {
+    const ready = isReady(check.state)
+    return (
+        <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                ready ? 'bg-white/10 text-white' : 'bg-white/[0.06] text-subdued'
+            }`}
+        >
+            {ready ? 'Ready' : check.state === null ? 'Checking…' : 'Needs setup'}
+        </span>
+    )
+}
+
+/** The three setup steps for one browser, ticked off as its checks pass. */
+export function SetupSteps({ browser, check }: { browser: BrowserName; check: BrowserCheck }) {
     const name = BROWSER_NAMES[browser]
     const { state } = check
-    const ready = isReady(state)
-    // A slow check of a browser that hasn't been allowed yet is sitting on
-    // macOS's permission prompt.
-    const promptShowing = check.since !== null && Date.now() - check.since > PROMPT_WAIT_MS && mayPrompt(state)
+    const promptShowing = isPrompting(check)
 
     const opened: StepStatus = promptShowing
         ? 'done'
@@ -274,48 +303,35 @@ function BrowserCard({ browser, icon, check }: { browser: BrowserName; icon: str
             : 'done'
     const allowed: StepStatus =
         opened !== 'done' ? 'waiting' : state === 'needs-permission' || promptShowing ? 'current' : 'done'
-    const scripting: StepStatus = allowed !== 'done' ? 'waiting' : ready ? 'done' : 'current'
+    const scripting: StepStatus = allowed !== 'done' ? 'waiting' : isReady(state) ? 'done' : 'current'
 
     return (
-        <section className="flex shrink-0 flex-col gap-3 rounded-xl bg-elevated p-4">
-            <div className="flex items-center gap-3">
-                <BrowserIcon icon={icon} />
-                <span className="flex-1 text-[15px] font-bold">{name}</span>
-                <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                        ready ? 'bg-white/10 text-white' : 'bg-white/[0.06] text-subdued'
-                    }`}
-                >
-                    {ready ? 'Ready' : state === null ? 'Checking…' : 'Needs setup'}
-                </span>
-            </div>
-            <ol className="flex flex-col gap-2.5 pl-1">
-                <Step status={opened} title={`Open ${name}`}>
-                    <SmallButton onClick={() => void window.musicBar.openBrowser(browser)}>Open {name}</SmallButton>
-                </Step>
-                <Step status={allowed} title={`Allow Music Bar to control ${name}`}>
-                    {promptShowing ? (
-                        <>macOS is asking. Click Allow (or OK) in its prompt.</>
-                    ) : (
-                        <>
-                            It was turned down. Turn on {name} under Music Bar in Privacy & Security → Automation.
-                            <SmallButton onClick={() => void window.musicBar.openAutomationSettings()}>
-                                Open System Settings
-                            </SmallButton>
-                        </>
-                    )}
-                </Step>
-                <Step status={scripting} title="Allow JavaScript from Apple Events">
-                    {state === 'failed' || state === 'error' ? (
-                        <>Music Bar couldn't reach {name}. Quit and reopen it, then check again.</>
-                    ) : (
-                        <>
-                            In {name}’s menu bar, choose <Keys>View → Developer → Allow JavaScript from Apple Events</Keys>.
-                        </>
-                    )}
-                </Step>
-            </ol>
-        </section>
+        <ol className="flex flex-col gap-2.5 pl-1">
+            <Step status={opened} title={`Open ${name}`}>
+                <SmallButton onClick={() => void window.musicBar.openBrowser(browser)}>Open {name}</SmallButton>
+            </Step>
+            <Step status={allowed} title={`Allow Music Bar to control ${name}`}>
+                {promptShowing ? (
+                    <p>macOS is asking. Click Allow (or OK) in its prompt.</p>
+                ) : (
+                    <>
+                        <p>It was turned down. Turn on {name} under Music Bar in Privacy & Security → Automation.</p>
+                        <SmallButton onClick={() => void window.musicBar.openAutomationSettings()}>
+                            Open System Settings
+                        </SmallButton>
+                    </>
+                )}
+            </Step>
+            <Step status={scripting} title="Allow JavaScript from Apple Events">
+                {state === 'failed' || state === 'error' ? (
+                    <p>Music Bar couldn't reach {name}. Quit and reopen it, then check again.</p>
+                ) : (
+                    <p>
+                        In {name}’s menu bar, choose <Keys>View → Developer → Allow JavaScript from Apple Events</Keys>.
+                    </p>
+                )}
+            </Step>
+        </ol>
     )
 }
 
@@ -335,6 +351,8 @@ function Step({ status, title, children }: { status: StepStatus; title: string; 
             </span>
             <div className="flex min-w-0 flex-col gap-1.5">
                 <span className={`text-sm font-semibold ${status === 'waiting' ? 'text-faint' : 'text-white'}`}>{title}</span>
+                {/* A column of sentences and buttons; keep each sentence in a
+                    <p>, or its pieces stack as separate lines. */}
                 {status === 'current' && (
                     <div className="flex flex-col items-start gap-2 text-[13px] leading-snug font-medium text-subdued">
                         {children}
@@ -345,7 +363,7 @@ function Step({ status, title, children }: { status: StepStatus; title: string; 
     )
 }
 
-function BrowserIcon({ icon }: { icon: string | null }) {
+export function BrowserIcon({ icon }: { icon: string | null }) {
     return icon ? (
         <img src={icon} alt="" className="size-9 shrink-0" draggable={false} />
     ) : (
@@ -353,7 +371,7 @@ function BrowserIcon({ icon }: { icon: string | null }) {
     )
 }
 
-function PrimaryButton({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
+export function PrimaryButton({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
     return (
         <button
             type="button"
@@ -378,6 +396,6 @@ function SmallButton({ onClick, children }: { onClick: () => void; children: Rea
     )
 }
 
-function Keys({ children }: { children: ReactNode }) {
+export function Keys({ children }: { children: ReactNode }) {
     return <span className="font-semibold whitespace-nowrap text-white">{children}</span>
 }

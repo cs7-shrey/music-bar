@@ -1,5 +1,5 @@
 import { execFile } from 'child_process'
-import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron'
+import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type NativeImage } from 'electron'
 import { join } from 'path'
 import { IPC, type BrowserName, type PlayerControl, type TrackSource } from '../shared/ipc'
 import {
@@ -18,6 +18,7 @@ import { getSettings, updateSettings } from './settings'
 import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
+const SETTINGS_SHORTCUT = 'CommandOrControl+,'
 
 let tray: Tray | null = null
 
@@ -33,6 +34,23 @@ function openMusicBar(): void {
     // it adds.
     if (needsSetup() || isSetupOpen()) showSetup()
     else showLauncher()
+}
+
+function openSettings(): void {
+    hideLauncher()
+    showSetup()
+}
+
+/** A menu icon from an SF Symbol, sharp on Retina and tinted like menu text. */
+function menuIcon(symbol: string): NativeImage {
+    const source = nativeImage.createFromNamedImage(symbol)
+    const icon = nativeImage.createEmpty()
+    for (const scaleFactor of [1, 2]) {
+        const buffer = source.resize({ height: 16 * scaleFactor, quality: 'best' }).toPNG()
+        icon.addRepresentation({ scaleFactor, buffer })
+    }
+    icon.setTemplateImage(true)
+    return icon
 }
 
 app.on('second-instance', openMusicBar)
@@ -53,7 +71,7 @@ function createTray(): void {
     tray.setContextMenu(
         Menu.buildFromTemplate([
             { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
-            { label: 'Choose Browsers…', click: showSetup },
+            { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: openSettings },
             { type: 'separator' },
             { label: 'Quit Music Bar', role: 'quit' },
         ]),
@@ -63,9 +81,19 @@ function createTray(): void {
 app.whenReady().then(() => {
     // Replaces Electron's default menu, whose Hide item owns ⌘H before the
     // launcher sees it (⌘H is "previous"). The Edit menu keeps copy/paste
-    // working in the search box.
+    // working in the search box, and ⌘, opens settings from the launcher.
     Menu.setApplicationMenu(
-        Menu.buildFromTemplate([{ label: app.name, submenu: [{ role: 'quit' }] }, { role: 'editMenu' }]),
+        Menu.buildFromTemplate([
+            {
+                label: app.name,
+                submenu: [
+                    { label: 'Settings…', accelerator: SETTINGS_SHORTCUT, click: openSettings },
+                    { type: 'separator' },
+                    { role: 'quit' },
+                ],
+            },
+            { role: 'editMenu' },
+        ]),
     )
     // Covers `pnpm dev`, where LSUIElement from forge.config.ts does not apply.
     app.dock?.hide()
@@ -107,10 +135,7 @@ app.whenReady().then(() => {
         holdThroughBlur(15_000)
         return youtubeMusic.openYouTubeMusic(browser, returnFocus).finally(() => holdThroughBlur(0))
     })
-    ipcMain.on(IPC.setupShow, () => {
-        hideLauncher()
-        showSetup()
-    })
+    ipcMain.on(IPC.setupShow, openSettings)
     ipcMain.handle(IPC.setupGet, async () => ({
         installed: await Promise.all(
             youtubeMusic.installedBrowsers().map(async ({ browser, path }) => ({

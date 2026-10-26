@@ -14,8 +14,8 @@ Use **pnpm** for everything. Do not use npm or yarn, and do not commit a
 - `pnpm build` / `pnpm make` — package the app / build a zip
 - `pnpm icons` — regenerate the app icon and menu bar icon from `assets/note.svg`
 
-`.npmrc` sets `node-linker=hoisted` because Electron Forge's packager needs a
-flat `node_modules`. Electron 44 downloads its binary on first launch, not at
+`pnpm-workspace.yaml` sets `nodeLinker: hoisted` because Electron Forge's
+packager needs a flat `node_modules` (pnpm 11+ ignores it in `.npmrc`). Electron 44 downloads its binary on first launch, not at
 install time.
 
 ## Stack
@@ -57,8 +57,10 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   launcher panel, because setup sends the user to browser menus and macOS
   prompts. It shows a Dock icon while open. Checks run one browser at a time
   so permission prompts come one by one. Until browsers are chosen, every
-  way into the app opens setup; afterwards it's under "Choose Browsers…" in
-  the menu bar menu. To test a first run: quit Music Bar, then
+  way into the app opens setup. After that the same window opens as
+  settings (`src/renderer/settings.tsx`, "Settings…" in the menu bar menu):
+  a sidebar of sections (`SECTIONS`; add new kinds of settings there).
+  Browsers switch on and off there, saved at once, with the same checks. To test a first run: quit Music Bar, then
   `rm ~/Library/Application\ Support/Music\ Bar/settings.json` and
   `tccutil reset AppleEvents dev.shrey.music-bar`.
 - `src/main/frontmost-app.ts` — reads and restores the frontmost app through
@@ -80,8 +82,8 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - The launcher hides on blur and on Esc. Hiding through `hideLauncher()` also
   calls `app.hide()` so focus returns to the previous app.
 - Renderer code never imports Electron; go through `window.musicBar`.
-- One renderer serves both windows: `main.tsx` renders setup for `#setup`,
-  else the launcher.
+- One renderer serves every window: `main.tsx` renders setup for `#setup`,
+  settings for `#settings`, else the launcher.
 - Don't use `app.getFileIcon`: it crashes Electron on macOS 26. Use
   `nativeImage.createThumbnailFromPath` for app icons.
 
