@@ -5,6 +5,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import type { BrowserName, BrowserSetupState, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
 import { getSettings } from './settings'
+import { describe, logger } from './log'
 
 // Talks to YouTube Music by running JavaScript inside its tab through the
 // browser's AppleScript `execute javascript` command. This works on background
@@ -123,9 +124,24 @@ function asString(value: string): string {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 }
 
+const log = logger('youtube-music')
+
+// What each thing polled was last logged as, so polls log changes only.
+const lastLogged = new Map<string, string>()
+
+function logChange(subject: string, state: string, ...details: unknown[]): void {
+    if (lastLogged.get(subject) === state) return
+    log.info(`${subject}: ${lastLogged.get(subject) ?? 'unknown'} → ${state}`, ...details)
+    lastLogged.set(subject, state)
+}
+
 function runAppleScript(script: string, timeoutMs = 10_000): Promise<string> {
     return new Promise((resolve, reject) => {
         execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
+            if (error?.killed) {
+                // Its first line says which browser it was talking to.
+                log.warn(`osascript timed out after ${timeoutMs}ms`, script.trim().split('\n')[0])
+            }
             if (error) reject(new Error(stderr.trim() || error.message))
             else resolve(stdout.trim())
         })
@@ -326,18 +342,30 @@ const PERMISSION_PROMPT_TIMEOUT_MS = 120_000
  */
 export async function checkBrowser(browser: BrowserName): Promise<BrowserSetupState> {
     if (!appPaths.has(browser)) throw new Error('Unsupported browser')
+    const started = Date.now()
     const read = await readBrowser(browser, PERMISSION_PROMPT_TIMEOUT_MS)
-    return read.running ? browserStatus(read).state : 'not-running'
+    const status = read.running ? browserStatus(read) : null
+    // A slow check most likely sat on macOS's permission prompt.
+    logChange(`setup check ${browser}`, status?.state ?? 'not-running', `took ${Date.now() - started}ms`, status ?? '')
+    return status?.state ?? 'not-running'
 }
 
 export async function getNowPlaying(): Promise<NowPlaying> {
     const reads = await Promise.all(enabledBrowsers().map((browser) => readBrowser(browser)))
+    for (const read of reads) {
+        const status = read.running ? browserStatus(read) : null
+        const tabs = read.results.filter((result) => 'source' in result).length
+        logChange(read.browser, status?.state ?? 'not running', status?.message ?? '', `${tabs} YT Music tab(s)`)
+    }
     // The browser last played from comes first, for "open YouTube Music in…".
     const browsers = reads
         .filter((read) => read.running)
         .map(browserStatus)
         .sort((a, b) => Number(b.browser === lastUsedBrowser) - Number(a.browser === lastUsedBrowser))
-    return { ...chooseNowPlaying(reads.flatMap((read) => read.results)), browsers }
+    const nowPlaying = chooseNowPlaying(reads.flatMap((read) => read.results))
+    // Status only: what's playing stays out of the log.
+    logChange('now playing', nowPlaying.status, nowPlaying.status === 'error' ? nowPlaying.message : '')
+    return { ...nowPlaying, browsers }
 }
 
 /** Picks what the card shows from every YT Music tab's read. */
@@ -531,6 +559,7 @@ async function wakeIfAsleep(source: TrackSource): Promise<void> {
     if (!(await isAsleep())) return
     await new Promise((resolve) => setTimeout(resolve, WAKE_RECHECK_MS))
     if (!(await isAsleep())) return
+    log.info('tab asleep, showing it to wake its media', source)
     await showTabUntil(
         source,
         async () => Number(await executeInTab(source, `String(document.querySelector('video')?.readyState ?? 0)`)) >= 2,
@@ -584,8 +613,11 @@ const AUTOPLAY_PROBE = `
 
 async function isPlaybackBlocked(source: TrackSource): Promise<boolean> {
     try {
-        return (await evaluateAsyncInTab(source, AUTOPLAY_PROBE, 3000)) === 'blocked'
-    } catch {
+        const blocked = (await evaluateAsyncInTab(source, AUTOPLAY_PROBE, 3000)) === 'blocked'
+        if (blocked) log.info('browser blocked playback until the page is clicked', source)
+        return blocked
+    } catch (error) {
+        log.warn(`autoplay probe failed: ${describe(error)}`, source)
         return false // Can't tell; let the action try.
     }
 }
@@ -862,6 +894,8 @@ end tell`)
         await afterTabMade?.()
         const [windowId, tabId, placement] = created.split(' ')
         const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
+        const started = Date.now()
+        log.info(`made a YT Music tab (${placement})`, source)
 
         const check = async (js: string) => {
             try {
@@ -875,6 +909,7 @@ end tell`)
             if (Date.now() > deadline) throw new Error(`YouTube Music didn't finish loading in ${browser}`)
             await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
         }
+        log.info(`YT Music loaded in ${Date.now() - started}ms`)
 
         // While the tab is on screen, play a moment of silence so the page
         // counts as having played media; then songs load from the background.
@@ -897,6 +932,8 @@ end tell`)
                 await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
             }
         }
+        const primer = await executeInTab(source, `String(window.__musicBarPrimed)`).catch(describe)
+        log.info(`primer ${primer}`)
         followed = source
         followedTrack = null
         lastUsedBrowser = browser

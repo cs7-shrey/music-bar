@@ -1,10 +1,13 @@
 import type { SearchResults, SearchSong } from '../shared/ipc'
 import { defaultTab, evaluateAsyncInTab } from './youtube-music'
+import { describe, logger } from './log'
 
 // Search goes through YouTube Music's own internal API (the endpoints its
 // search box calls), run inside a YT Music tab so requests carry the user's
 // session and results match what the page would show. Nothing visible
 // changes in the tab.
+
+const log = logger('search')
 
 const MAX_SUGGESTIONS = 3
 const MAX_SONGS = 5
@@ -101,7 +104,9 @@ async function run(query: string, perform: (query: string) => Promise<SearchResu
     try {
         return await perform(trimmed)
     } catch (error) {
-        return { status: 'error', message: error instanceof Error ? error.message : String(error) }
+        // The query stays out of the log.
+        log.warn(`search failed: ${describe(error)}`)
+        return { status: 'error', message: describe(error) }
     }
 }
 

@@ -16,11 +16,51 @@ import { fetchArtwork } from './artwork'
 import { activateApp, frontmostApp } from './frontmost-app'
 import { getSettings, updateSettings } from './settings'
 import { closeSetup, isSetupOpen, showSetup } from './setup-window'
+import { describe, logFile, logger } from './log'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 const SETTINGS_SHORTCUT = 'CommandOrControl+,'
 
 let tray: Tray | null = null
+
+const log = logger('app')
+
+// Logged rather than shown as Electron's error dialog; the app keeps running.
+process.on('uncaughtException', (error) => log.error('uncaught exception', error))
+process.on('unhandledRejection', (reason) => log.error('unhandled rejection', reason))
+app.on('render-process-gone', (_event, contents, { reason, exitCode }) =>
+    log.error(`renderer gone (${contents.getURL()})`, { reason, exitCode }),
+)
+app.on('child-process-gone', (_event, { type, reason, exitCode }) =>
+    log.error(`${type} process gone`, { reason, exitCode }),
+)
+// Warnings and errors from every window, uncaught renderer errors included.
+app.on('web-contents-created', (_event, contents) => {
+    contents.on('console-message', ({ level, message, sourceId, lineNumber }) => {
+        if (level === 'warning' || level === 'error') {
+            const where = `${contents.getURL().split('#')[1] ?? 'launcher'}: ${sourceId.split('/').pop()}:${lineNumber}`
+            logger('renderer')[level === 'error' ? 'error' : 'warn'](message, where)
+        }
+    })
+})
+
+/**
+ * Handles an IPC call for something the user did, logging it with its
+ * arguments, how long it took and how it ended.
+ */
+function handleAction<Args extends unknown[]>(channel: string, action: (...args: Args) => unknown): void {
+    ipcMain.handle(channel, async (_event, ...args) => {
+        const started = Date.now()
+        try {
+            const result = await action(...(args as Args))
+            log.info(`${channel} ok in ${Date.now() - started}ms`, ...args)
+            return result
+        } catch (error) {
+            log.warn(`${channel} failed in ${Date.now() - started}ms: ${describe(error)}`, ...args)
+            throw error
+        }
+    })
+}
 
 if (!app.requestSingleInstanceLock()) {
     app.quit()
@@ -72,6 +112,7 @@ function createTray(): void {
         Menu.buildFromTemplate([
             { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
             { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: openSettings },
+            { label: 'Show Log File', click: () => shell.showItemInFolder(logFile()) },
             { type: 'separator' },
             { label: 'Quit Music Bar', role: 'quit' },
         ]),
@@ -79,6 +120,14 @@ function createTray(): void {
 }
 
 app.whenReady().then(() => {
+    log.info(`Music Bar ${app.getVersion()} started`, {
+        electron: process.versions.electron,
+        macOS: process.getSystemVersion(),
+        arch: process.arch,
+        packaged: app.isPackaged,
+        installed: youtubeMusic.installedBrowsers().map(({ browser }) => browser),
+        chosen: getSettings().browsers,
+    })
     // Replaces Electron's default menu, whose Hide item owns ⌘H before the
     // launcher sees it (⌘H is "previous"). The Edit menu keeps copy/paste
     // working in the search box, and ⌘, opens settings from the launcher.
@@ -112,17 +161,17 @@ app.whenReady().then(() => {
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
     ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())
     ipcMain.handle(IPC.nowPlayingGetFollowed, () => youtubeMusic.getFollowedNowPlaying())
-    ipcMain.handle(IPC.nowPlayingControl, (_event, source: TrackSource, control: PlayerControl) =>
+    // Reads poll every second or so and aren't logged per call;
+    // youtube-music.ts logs when what they find changes.
+    handleAction(IPC.nowPlayingControl, (source: TrackSource, control: PlayerControl) =>
         youtubeMusic.control(source, control),
     )
-    ipcMain.handle(IPC.nowPlayingSetPlaying, (_event, source: TrackSource, playing: boolean) =>
+    handleAction(IPC.nowPlayingSetPlaying, (source: TrackSource, playing: boolean) =>
         youtubeMusic.setPlaying(source, playing),
     )
-    ipcMain.handle(IPC.nowPlayingLoadTab, (_event, source: TrackSource) => youtubeMusic.loadTab(source))
-    ipcMain.handle(IPC.nowPlayingSetLoop, (_event, source: TrackSource, enabled: boolean) =>
-        youtubeMusic.setLoop(source, enabled),
-    )
-    ipcMain.handle(IPC.openYouTubeMusic, async (_event, browser: BrowserName) => {
+    handleAction(IPC.nowPlayingLoadTab, (source: TrackSource) => youtubeMusic.loadTab(source))
+    handleAction(IPC.nowPlayingSetLoop, (source: TrackSource, enabled: boolean) => youtubeMusic.setLoop(source, enabled))
+    handleAction(IPC.openYouTubeMusic, async (browser: BrowserName) => {
         // The browser comes forward when the tab is made. The app the user
         // was in goes back in front right after, and the launcher takes the
         // keyboard again; it stays up through all that so the search results
@@ -149,9 +198,9 @@ app.whenReady().then(() => {
         ),
         chosen: getSettings().browsers,
     }))
-    ipcMain.handle(IPC.setupSetBrowsers, (_event, browsers: BrowserName[]) => updateSettings({ browsers }))
+    handleAction(IPC.setupSetBrowsers, (browsers: BrowserName[]) => updateSettings({ browsers }))
     ipcMain.handle(IPC.setupCheck, (_event, browser: BrowserName) => youtubeMusic.checkBrowser(browser))
-    ipcMain.handle(IPC.setupOpenBrowser, (_event, browser: BrowserName) => {
+    handleAction(IPC.setupOpenBrowser, (browser: BrowserName) => {
         if (!youtubeMusic.installedBrowsers().some((installed) => installed.browser === browser)) return
         execFile('open', ['-a', browser])
     })
@@ -159,19 +208,20 @@ app.whenReady().then(() => {
         shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'),
     )
     ipcMain.on(IPC.setupFinish, () => {
+        log.info('setup finished', getSettings())
         void closeSetup().then(showLauncher)
     })
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
-    ipcMain.handle(IPC.playNow, (_event, videoId: string) => youtubeMusic.playNow(videoId))
-    ipcMain.handle(IPC.playNext, (_event, videoId: string) => youtubeMusic.playNext(videoId))
-    ipcMain.handle(IPC.showTab, (_event, source: TrackSource) => youtubeMusic.showTab(source))
-    ipcMain.handle(IPC.startRadio, (_event, source: TrackSource) => youtubeMusic.startRadio(source))
-    ipcMain.handle(IPC.startRadioFromSong, (_event, videoId: string) => youtubeMusic.startRadioFromSong(videoId))
+    handleAction(IPC.playNow, (videoId: string) => youtubeMusic.playNow(videoId))
+    handleAction(IPC.playNext, (videoId: string) => youtubeMusic.playNext(videoId))
+    handleAction(IPC.showTab, (source: TrackSource) => youtubeMusic.showTab(source))
+    handleAction(IPC.startRadio, (source: TrackSource) => youtubeMusic.startRadio(source))
+    handleAction(IPC.startRadioFromSong, (videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 
     if (!globalShortcut.register(SHORTCUT, () => (needsSetup() ? showSetup() : toggleLauncher()))) {
-        console.warn(`[music-bar] could not register ${SHORTCUT}; another app may own it`)
+        log.warn(`couldn't register ${SHORTCUT}; another app may own it`)
     }
 })
 

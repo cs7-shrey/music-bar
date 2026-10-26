@@ -1,4 +1,5 @@
 import { session } from 'electron'
+import { logger } from './log'
 
 // Artwork is downloaded here rather than by the launcher's <img>: connections
 // to Google's image host sometimes stall, and a browser keeps reusing a
@@ -10,6 +11,8 @@ const ALLOWED_HOSTS = /(^|\.)(googleusercontent\.com|ytimg\.com|ggpht\.com)$/
 const ATTEMPT_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [500, 2000, 5000]
 const CACHE_SIZE = 30
+
+const log = logger('artwork')
 
 // Recent downloads (and ones in flight) by URL, as data: URLs.
 const cache = new Map<string, Promise<string>>()
@@ -47,7 +50,7 @@ async function downloadWithRetries(url: string): Promise<string> {
         } catch (error) {
             lastError = error
             const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-            console.warn(`[music-bar] artwork attempt ${attempt + 1} failed (${reason}): ${url}`)
+            log.warn(`attempt ${attempt + 1} failed (${reason}): ${url}`)
         }
     }
     throw lastError

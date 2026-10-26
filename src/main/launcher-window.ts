@@ -55,11 +55,6 @@ export function createLauncherWindow(): BrowserWindow {
         if (showWhenLoaded) showLauncher()
     })
 
-    // Renderer warnings and errors land in the terminal running the app.
-    window.webContents.on('console-message', ({ level, message }) => {
-        if (level === 'warning' || level === 'error') console.log(`[renderer:${level}] ${message}`)
-    })
-
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
         void window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
     } else {

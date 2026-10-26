@@ -66,6 +66,11 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/main/frontmost-app.ts` — reads and restores the frontmost app through
   AppKit (JXA), no Automation permission needed. Opening YouTube Music brings
   the browser forward; this puts the user's app back in front.
+- `src/main/log.ts` — the log file, `~/Library/Logs/Music Bar/main.log`
+  ("Show Log File" in the menu bar menu), to ask users for when something
+  breaks. Log user actions (`handleAction` in `index.ts` does it for IPC),
+  failures, and state changes, not every poll. Keep search queries and
+  what's playing out of it.
 - `src/preload/` — exposes `window.musicBar` via `contextBridge`.
 - `src/shared/` — IPC channel names and the `MusicBarApi` type, shared by all
   processes. Add every new IPC channel here.
