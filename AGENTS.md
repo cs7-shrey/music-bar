@@ -13,10 +13,13 @@ Use **pnpm** for everything. Do not use npm or yarn, and do not commit a
 - `pnpm typecheck` — typecheck main/preload and renderer
 - `pnpm build` / `pnpm make` — package the app / build a zip
 - `pnpm icons` — regenerate the app icon and menu bar icon from `assets/note.svg`
+- `pnpm release <patch|minor|major|x.y.z>` — cut a release (see Releasing)
 
 `pnpm-workspace.yaml` sets `nodeLinker: hoisted` because Electron Forge's
-packager needs a flat `node_modules` (pnpm 11+ ignores it in `.npmrc`). Electron 44 downloads its binary on first launch, not at
-install time.
+packager needs a flat `node_modules` (pnpm 11+ ignores it in `.npmrc`). It
+also lists the dependencies allowed to run install scripts (`allowBuilds`);
+pnpm skips any other's and fails the install. Electron 44 downloads its
+binary on first launch, not at install time.
 
 ## Stack
 
@@ -104,6 +107,20 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 song`, `fix(open): return focus to the previous app`. Types: `feat`, `fix`,
 `refactor`, `perf`, `style`, `docs`, `test`, `build`, `chore`. Summary in the
 imperative, lower case, no trailing period.
+
+## Releasing
+
+`pnpm release minor` (or `patch`, `major`, or an exact `x.y.z`) on an
+up-to-date `main` bumps `version` in `package.json`, commits
+`chore(release): vX.Y.Z`, tags it `vX.Y.Z` and pushes both. The tag runs
+`.github/workflows/release.yml` on GitHub's Apple silicon Macs: it builds
+the DMG (`pnpm make`) and publishes a GitHub release with it attached as
+`Music-Bar-X.Y.Z-arm64.dmg`. The notes come from `scripts/release-notes.mjs`:
+the `feat`, `fix` and `perf` commit summaries since the previous tag, so
+write those summaries for users. They end with install steps, including
+Open Anyway, needed while the app isn't signed. Edit a release's notes on
+GitHub afterwards if needed. Never move or reuse a published tag; release
+a new patch instead.
 
 ## Player actions: debouncing and ordering
 

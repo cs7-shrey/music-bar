@@ -1,2 +1,8 @@
 # Electron Forge's packager walks node_modules and needs a flat layout.
 nodeLinker: hoisted
+
+# Install scripts pnpm may run. These two build the native helpers the DMG
+# maker uses to lay out the DMG window.
+allowBuilds:
+  fs-xattr: true
+  macos-alias: true

@@ -1,0 +1,54 @@
+# Builds the app and publishes a GitHub release for each vX.Y.Z tag.
+# Tags come from `pnpm release` (scripts/release.mjs).
+
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: write # to create the release
+
+jobs:
+    release:
+        # Apple silicon, matching the arm64 build.
+        runs-on: macos-15
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  # Every commit and tag, for the notes since the last release.
+                  fetch-depth: 0
+
+            # Uses the pnpm version in package.json's packageManager.
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - run: pnpm install --frozen-lockfile
+
+            - name: Check the tag matches package.json
+              run: |
+                  version=$(node -p "require('./package.json').version")
+                  if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+                      echo "Tag $GITHUB_REF_NAME doesn't match package.json ($version). Release with pnpm release."
+                      exit 1
+                  fi
+
+            - run: pnpm typecheck
+
+            - run: pnpm make
+
+            - name: Publish the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version=${GITHUB_REF_NAME#v}
+                  # No spaces: GitHub would turn them into dots in the download name.
+                  dmg="Music-Bar-$version-arm64.dmg"
+                  cp "out/make/Music Bar-$version-arm64.dmg" "$dmg"
+                  node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+                  gh release create "$GITHUB_REF_NAME" "$dmg" --title "Music Bar $version" --notes-file notes.md

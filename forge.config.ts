@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process'
 import { join } from 'path'
 import type { ForgeConfig } from '@electron-forge/shared-types'
 import { VitePlugin } from '@electron-forge/plugin-vite'
+import { MakerDMG } from '@electron-forge/maker-dmg'
 import { MakerZIP } from '@electron-forge/maker-zip'
 
 const config: ForgeConfig = {
@@ -19,7 +20,13 @@ const config: ForgeConfig = {
                 'Music Bar controls YouTube Music in your browser to show and change what is playing.',
         },
     },
-    makers: [new MakerZIP({}, ['darwin'])],
+    makers: [
+        // What users download: opens to the app beside an Applications
+        // shortcut to drag it onto.
+        new MakerDMG({ icon: 'assets/icon.icns' }),
+        // Kept for auto-update later, which installs from a zip.
+        new MakerZIP({}, ['darwin']),
+    ],
     hooks: {
         // Packaging renames Electron's app and edits its Info.plist and icon,
         // which breaks the ad-hoc signature Electron ships with. A downloaded
