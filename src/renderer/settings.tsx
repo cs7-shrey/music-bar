@@ -122,7 +122,7 @@ function GeneralSection() {
                     <span className="text-[13px] font-medium text-subdued">
                         {loginItem?.available === false
                             ? 'Only in the built app, not in development.'
-                            : 'Starts quietly in the menu bar, so ⌘⇧Space works right after you log in.'}
+                            : 'Starts quietly in the menu bar, so ⌥⇧Space works right after you log in.'}
                     </span>
                 </div>
                 <Switch
@@ -229,7 +229,7 @@ function BrowserRow({
 const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string[] }[] }[] = [
     {
         title: 'Anywhere',
-        shortcuts: [{ label: 'Open Music Bar', keys: ['⌘', '⇧', 'Space'] }],
+        shortcuts: [{ label: 'Open Music Bar', keys: ['⌥', '⇧', 'Space'] }],
     },
     {
         title: 'Player',

@@ -19,7 +19,7 @@ import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 import { describe, logFile, logger } from './log'
 import { canOpenAtLogin, isOpenAtLogin, openedAtLogin, refreshOpenAtLogin, setOpenAtLogin } from './login-item'
 
-const SHORTCUT = 'CommandOrControl+Shift+Space'
+const SHORTCUT = 'Alt+Shift+Space'
 const SETTINGS_SHORTCUT = 'CommandOrControl+,'
 
 let tray: Tray | null = null

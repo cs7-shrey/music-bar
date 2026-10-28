@@ -1,6 +1,6 @@
 # Music Bar
 
-Raycast-style launcher (⌘⇧Space) for controlling YouTube Music playing in a
+Raycast-style launcher (⌥⇧Space) for controlling YouTube Music playing in a
 Chromium browser (Brave first, also Chrome and Helium). macOS only.
 
 ## Package manager
