@@ -22,8 +22,21 @@ const config: ForgeConfig = {
     },
     makers: [
         // What users download: opens to the app beside an Applications
-        // shortcut to drag it onto.
-        new MakerDMG({ icon: 'assets/icon.icns' }),
+        // shortcut to drag it onto. The background and its layout come from
+        // `pnpm icons` (DMG_* in scripts/build-icons.mjs).
+        new MakerDMG({
+            icon: 'assets/icon.icns',
+            background: 'assets/dmg-background.png',
+            iconSize: 112,
+            additionalDMGOptions: { window: { size: { width: 640, height: 400 } } },
+            contents: (opts) => [
+                { type: 'file', path: opts.appPath, x: 170, y: 180 },
+                { type: 'link', path: '/Applications', x: 470, y: 180 },
+                // Hidden files, out of sight for anyone who shows them.
+                { type: 'position', path: '.background', x: 170, y: 900 },
+                { type: 'position', path: '.VolumeIcon.icns', x: 470, y: 900 },
+            ],
+        }),
         // Kept for auto-update later, which installs from a zip.
         new MakerZIP({}, ['darwin']),
     ],

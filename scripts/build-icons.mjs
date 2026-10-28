@@ -5,7 +5,8 @@
 // Writes assets/icon.svg + assets/icon.icns (app icon on Apple's rounded
 // tile), assets/mark.svg (the note on a circle, for use inside the app) and
 // assets/trayTemplate.svg + trayTemplate.png / @2x.png (black on
-// transparent, which macOS tints for light and dark menu bars).
+// transparent, which macOS tints for light and dark menu bars), and
+// assets/dmg-background.png / @2x.png (the installer window).
 // Needs macOS for iconutil.
 
 import { execFileSync } from 'child_process'
@@ -89,6 +90,27 @@ const tray = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TRAY_SIZE} 
 </svg>
 `
 
+// Installer (DMG) window: plain white, the app's icon beside an
+// Applications shortcut with an arrow between them. White because Finder
+// draws the icon names itself, in black in light mode. The window is
+// DMG_WINDOW; Finder may still draw it bigger (it does on macOS 26), so the
+// picture runs on past it. The icon centers here must match `contents` in
+// forge.config.ts.
+const DMG_WINDOW = { width: 640, height: 400 }
+const DMG_CANVAS = { width: 1600, height: 1000 }
+const DMG_APP = { x: 170, y: 180 }
+const DMG_APPLICATIONS = { x: 470, y: 180 }
+const arrowY = DMG_APP.y - 4
+const dmgBackground = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${DMG_CANVAS.width} ${DMG_CANVAS.height}" width="${DMG_CANVAS.width}" height="${DMG_CANVAS.height}">
+    <rect width="100%" height="100%" fill="#ffffff"/>
+    <g fill="none" stroke="#b0b0b5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M${DMG_APP.x + 88} ${arrowY}H${DMG_APPLICATIONS.x - 88}"/>
+        <path d="M${DMG_APPLICATIONS.x - 100} ${arrowY - 12}L${DMG_APPLICATIONS.x - 88} ${arrowY}L${DMG_APPLICATIONS.x - 100} ${arrowY + 12}"/>
+    </g>
+    <text x="${DMG_WINDOW.width / 2}" y="318" text-anchor="middle" font-family="Helvetica Neue" font-size="14" font-weight="500" fill="#8e8e93">Drag Music Bar onto Applications to install it</text>
+</svg>
+`
+
 const render = (svg, size) => new Resvg(svg, { fitTo: { mode: 'width', value: size } }).render().asPng()
 
 writeFileSync(join(ASSETS, 'icon.svg'), icon)
@@ -96,6 +118,8 @@ writeFileSync(join(ASSETS, 'mark.svg'), mark)
 writeFileSync(join(ASSETS, 'trayTemplate.svg'), tray)
 writeFileSync(join(ASSETS, 'trayTemplate.png'), render(tray, TRAY_SIZE))
 writeFileSync(join(ASSETS, 'trayTemplate@2x.png'), render(tray, TRAY_SIZE * 2))
+writeFileSync(join(ASSETS, 'dmg-background.png'), render(dmgBackground, DMG_CANVAS.width))
+writeFileSync(join(ASSETS, 'dmg-background@2x.png'), render(dmgBackground, DMG_CANVAS.width * 2))
 
 const iconset = join(tmpdir(), 'music-bar-icon.iconset')
 rmSync(iconset, { recursive: true, force: true })
@@ -106,4 +130,4 @@ for (const size of [16, 32, 128, 256, 512]) {
 }
 execFileSync('iconutil', ['-c', 'icns', iconset, '-o', join(ASSETS, 'icon.icns')])
 rmSync(iconset, { recursive: true })
-console.log('Wrote assets/icon.icns, assets/trayTemplate.png and @2x')
+console.log('Wrote assets/icon.icns, assets/trayTemplate.png, assets/dmg-background.png and their @2x')

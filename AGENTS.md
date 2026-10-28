@@ -85,7 +85,8 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/renderer/` — the launcher UI.
 - `assets/` — `note.svg` is the logo's source. `scripts/build-icons.mjs` turns
   it into `icon.icns` (app icon on Apple's rounded tile) and
-  `trayTemplate.png` / `@2x` (menu bar template image). The generated files
+  `trayTemplate.png` / `@2x` (menu bar template image), and
+  `dmg-background.png` / `@2x` (the installer window). The generated files
   are committed; rerun `pnpm icons` after changing `note.svg`.
 
 ## Conventions
