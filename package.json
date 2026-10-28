@@ -3,6 +3,7 @@
     "productName": "Music Bar",
     "version": "0.1.1",
     "private": true,
+    "license": "MIT",
     "description": "Raycast-style launcher for controlling YouTube Music in Chromium browsers",
     "main": ".vite/build/main.js",
     "packageManager": "pnpm@12.4.1",
