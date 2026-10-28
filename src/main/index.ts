@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type NativeImage } from 'electron'
 import { join } from 'path'
-import { IPC, type BrowserName, type PlayerControl, type TrackSource } from '../shared/ipc'
+import { IPC, type BrowserName, type PlayerControl, type SettingsSection, type TrackSource } from '../shared/ipc'
 import {
     createLauncherWindow,
     focusLauncher,
@@ -17,6 +17,7 @@ import { activateApp, frontmostApp } from './frontmost-app'
 import { getSettings, updateSettings } from './settings'
 import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 import { describe, logFile, logger } from './log'
+import { canOpenAtLogin, isOpenAtLogin, openedAtLogin, refreshOpenAtLogin, setOpenAtLogin } from './login-item'
 
 const SHORTCUT = 'CommandOrControl+Shift+Space'
 const SETTINGS_SHORTCUT = 'CommandOrControl+,'
@@ -76,9 +77,9 @@ function openMusicBar(): void {
     else showLauncher()
 }
 
-function openSettings(): void {
+function openSettings(section?: SettingsSection): void {
     hideLauncher()
-    showSetup()
+    showSetup(section)
 }
 
 /** A menu icon from an SF Symbol, sharp on Retina and tinted like menu text. */
@@ -111,7 +112,7 @@ function createTray(): void {
     tray.setContextMenu(
         Menu.buildFromTemplate([
             { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
-            { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: openSettings },
+            { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: () => openSettings() },
             { label: 'Show Log File', click: () => shell.showItemInFolder(logFile()) },
             { type: 'separator' },
             { label: 'Quit Music Bar', role: 'quit' },
@@ -125,6 +126,8 @@ app.whenReady().then(() => {
         macOS: process.getSystemVersion(),
         arch: process.arch,
         packaged: app.isPackaged,
+        openedAtLogin,
+        openAtLogin: isOpenAtLogin(),
         installed: youtubeMusic.installedBrowsers().map(({ browser }) => browser),
         chosen: getSettings().browsers,
     })
@@ -136,7 +139,7 @@ app.whenReady().then(() => {
             {
                 label: app.name,
                 submenu: [
-                    { label: 'Settings…', accelerator: SETTINGS_SHORTCUT, click: openSettings },
+                    { label: 'Settings…', accelerator: SETTINGS_SHORTCUT, click: () => openSettings() },
                     { type: 'separator' },
                     { role: 'quit' },
                 ],
@@ -152,11 +155,12 @@ app.whenReady().then(() => {
 
     createLauncherWindow()
     createTray()
+    refreshOpenAtLogin()
     // Opening the app shows setup the first time, then the launcher. Not the
-    // launcher in `pnpm dev`, which restarts the app on every main-process
-    // change.
+    // launcher at login, which starts quietly in the menu bar, or in
+    // `pnpm dev`, which restarts the app on every main-process change.
     if (needsSetup()) showSetup()
-    else if (app.isPackaged) showLauncher()
+    else if (app.isPackaged && !openedAtLogin) showLauncher()
 
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
     ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())
@@ -184,7 +188,9 @@ app.whenReady().then(() => {
         holdThroughBlur(15_000)
         return youtubeMusic.openYouTubeMusic(browser, returnFocus).finally(() => holdThroughBlur(0))
     })
-    ipcMain.on(IPC.setupShow, openSettings)
+    ipcMain.on(IPC.setupShow, (_event, section?: SettingsSection) => openSettings(section))
+    ipcMain.handle(IPC.loginItemGet, () => ({ enabled: isOpenAtLogin(), available: canOpenAtLogin() }))
+    handleAction(IPC.loginItemSet, (enabled: boolean) => setOpenAtLogin(enabled))
     ipcMain.handle(IPC.setupGet, async () => ({
         installed: await Promise.all(
             youtubeMusic.installedBrowsers().map(async ({ browser, path }) => ({

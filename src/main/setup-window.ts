@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { frontmostApp } from './frontmost-app'
 import { getSettings } from './settings'
+import { IPC, type SettingsSection } from '../shared/ipc'
 
 // The setup window: an ordinary window rather than the launcher panel, since
 // setup sends the user to their browser's menus and to macOS prompts, and the
@@ -16,8 +17,9 @@ export function isSetupOpen(): boolean {
     return window !== null
 }
 
-export function showSetup(): void {
+export function showSetup(section?: SettingsSection): void {
     if (window) {
+        if (section) window.webContents.send(IPC.settingsSection, section)
         window.show()
         window.focus()
         app.focus({ steal: true })
@@ -25,6 +27,7 @@ export function showSetup(): void {
     }
 
     const page = getSettings().browsers === null ? 'setup' : 'settings'
+    const hash = page === 'settings' && section ? `settings/${section}` : page
     window = new BrowserWindow({
         // Setup is one narrow column. Settings has a sidebar of sections and
         // room to grow.
@@ -58,9 +61,9 @@ export function showSetup(): void {
     })
 
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-        void window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}#${page}`)
+        void window.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}#${hash}`)
     } else {
-        void window.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), { hash: page })
+        void window.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), { hash })
     }
 }
 

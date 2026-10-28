@@ -35,8 +35,17 @@ export const IPC = {
     showTab: 'player:show-tab',
     /** renderer → main (invoke): start a radio from a search result. */
     startRadioFromSong: 'player:start-radio-from-song',
-    /** renderer → main: open setup (or settings, once browsers are chosen), or bring it forward. */
+    /**
+     * renderer → main: open setup (or settings, once browsers are chosen), or
+     * bring it forward; optionally on a settings section.
+     */
     setupShow: 'setup:show',
+    /** main → renderer: the settings window should switch to a section. */
+    settingsSection: 'settings:section',
+    /** renderer → main (invoke): whether Music Bar opens at login, and whether it can. */
+    loginItemGet: 'login-item:get',
+    /** renderer → main (invoke): turn opening at login on or off. */
+    loginItemSet: 'login-item:set',
     /** renderer → main (invoke): installed browsers and the ones chosen in setup. */
     setupGet: 'setup:get',
     /** renderer → main (invoke): save which browsers Music Bar may use. */
@@ -52,6 +61,14 @@ export const IPC = {
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
+
+export type SettingsSection = 'general' | 'browsers' | 'shortcuts'
+
+export interface LoginItemInfo {
+    enabled: boolean
+    /** False in development, where the app can't open itself at login. */
+    available: boolean
+}
 
 /** Identifies the browser tab a track is playing in. */
 export interface TrackSource {
@@ -166,7 +183,10 @@ export interface MusicBarApi {
     startRadio(source: TrackSource): Promise<void>
     startRadioFromSong(song: SearchSong): Promise<void>
     showTab(source: TrackSource): Promise<void>
-    showSetup(): void
+    showSetup(section?: SettingsSection): void
+    onSettingsSection(listener: (section: SettingsSection) => void): () => void
+    getOpenAtLogin(): Promise<LoginItemInfo>
+    setOpenAtLogin(enabled: boolean): Promise<void>
     getSetup(): Promise<SetupInfo>
     setBrowsers(browsers: BrowserName[]): Promise<void>
     checkBrowser(browser: BrowserName): Promise<BrowserSetupState>

@@ -282,7 +282,7 @@ export default function App() {
                     title={BROWSER_NAMES[status.browser]}
                     subtitle={describeBrowser(status)}
                     badge={BROWSER_STATES[status.state].label}
-                    onSelect={() => window.musicBar.showSetup()}
+                    onSelect={() => window.musicBar.showSetup('browsers')}
                 />
             ))}
         </Command.Group>

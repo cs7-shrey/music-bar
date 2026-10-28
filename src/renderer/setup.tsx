@@ -33,6 +33,8 @@ export default function Setup() {
     const [installed, setInstalled] = useState<InstalledBrowser[] | null>(null)
     const [chosen, setChosen] = useState<BrowserName[]>([])
     const [step, setStep] = useState<'choose' | 'connect'>('choose')
+    // On unless turned off here; null where the app can't open at login (development).
+    const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null)
     // Checks run only on the connect step; choosing a browser asks nothing yet.
     const checks = useBrowserChecks(step === 'connect' ? chosen : [])
     // Music Bar works once one browser is ready; the rest can wait.
@@ -45,6 +47,7 @@ export default function Setup() {
             // A single browser needs no choosing.
             setChosen(info.chosen?.filter((b) => available.includes(b)) ?? (available.length === 1 ? available : []))
         })
+        void window.musicBar.getOpenAtLogin().then((info) => setOpenAtLogin(info.available ? true : null))
     }, [])
 
     const toggle = (browser: BrowserName) =>
@@ -54,6 +57,7 @@ export default function Setup() {
         // Kept in the order they're listed, not the order they were clicked.
         const ordered = (installed ?? []).map((item) => item.browser).filter((b) => chosen.includes(b))
         await window.musicBar.setBrowsers(ordered)
+        if (openAtLogin !== null) await window.musicBar.setOpenAtLogin(openAtLogin)
         setChosen(ordered)
         setStep('connect')
     }
@@ -83,7 +87,24 @@ export default function Setup() {
                 </header>
 
                 {step === 'choose' ? (
-                    <ChooseBrowsers installed={installed} chosen={chosen} onToggle={toggle} />
+                    <>
+                        <ChooseBrowsers installed={installed} chosen={chosen} onToggle={toggle} />
+                        {openAtLogin !== null && !!installed?.length && (
+                            <div className="mt-4 flex shrink-0 items-center gap-4 rounded-xl bg-elevated px-4 py-3">
+                                <div className="flex flex-1 flex-col gap-0.5">
+                                    <span className="text-sm font-bold">Open at login</span>
+                                    <span className="text-xs font-medium text-subdued">
+                                        Starts quietly in the menu bar, so <Keys>⌘⇧Space</Keys> always works.
+                                    </span>
+                                </div>
+                                <Switch
+                                    label="Open at login"
+                                    on={openAtLogin}
+                                    onToggle={() => setOpenAtLogin(!openAtLogin)}
+                                />
+                            </div>
+                        )}
+                    </>
                 ) : (
                     <ConnectBrowsers browsers={chosen} icons={installed ?? []} checks={checks} />
                 )}
@@ -392,6 +413,41 @@ function SmallButton({ onClick, children }: { onClick: () => void; children: Rea
             className="rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-white"
         >
             {children}
+        </button>
+    )
+}
+
+export function Switch({
+    label,
+    on,
+    disabled,
+    title,
+    onToggle,
+}: {
+    label: string
+    on: boolean
+    disabled?: boolean
+    title?: string
+    onToggle: () => void
+}) {
+    return (
+        <button
+            type="button"
+            role="switch"
+            aria-checked={on}
+            aria-label={label}
+            title={title}
+            disabled={disabled}
+            onClick={onToggle}
+            className={`relative h-6 w-10 shrink-0 rounded-full transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-50 ${
+                on ? 'bg-accent' : 'bg-white/15 hover:bg-white/20'
+            }`}
+        >
+            <span
+                className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform ${
+                    on ? 'translate-x-4' : ''
+                }`}
+            />
         </button>
     )
 }

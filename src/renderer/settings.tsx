@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Globe, Keyboard } from 'lucide-react'
-import type { BrowserName, InstalledBrowser } from '../shared/ipc'
+import { Globe, Keyboard, SlidersHorizontal } from 'lucide-react'
+import type { BrowserName, InstalledBrowser, LoginItemInfo, SettingsSection } from '../shared/ipc'
 import { BROWSER_NAMES } from './now-playing'
 import {
     BrowserIcon,
@@ -8,6 +8,7 @@ import {
     isReady,
     SetupSteps,
     StatusPill,
+    Switch,
     useBrowserChecks,
     type BrowserCheck,
 } from './setup'
@@ -18,15 +19,26 @@ import markUrl from '../../assets/mark.svg'
 // as they're made.
 
 // Sidebar sections. Each new kind of setting gets its own.
-const SECTIONS = [
+const SECTIONS: { id: SettingsSection; label: string; icon: typeof Globe }[] = [
+    { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'browsers', label: 'Browsers', icon: Globe },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-] as const
+]
 
-type SectionId = (typeof SECTIONS)[number]['id']
+const isSection = (value: unknown): value is SettingsSection => SECTIONS.some((section) => section.id === value)
 
 export default function Settings() {
-    const [section, setSection] = useState<SectionId>('browsers')
+    // The window opens on #settings/<section> when sent somewhere specific,
+    // such as from a browser that needs setup.
+    const [section, setSection] = useState<SettingsSection>(() => {
+        const fromHash = location.hash.split('/')[1]
+        return isSection(fromHash) ? fromHash : 'general'
+    })
+
+    useEffect(
+        () => window.musicBar.onSettingsSection((next) => isSection(next) && setSection(next)),
+        [],
+    )
 
     useEffect(() => {
         // A settings window closes with Esc or ⌘W.
@@ -69,6 +81,7 @@ export default function Settings() {
                 <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-10">
                     {/* Capped, so rows stay readable in a wide window. */}
                     <div className="max-w-[640px]">
+                        {section === 'general' && <GeneralSection />}
                         {section === 'browsers' && <BrowsersSection />}
                         {section === 'shortcuts' && <ShortcutsSection />}
                     </div>
@@ -84,6 +97,42 @@ function SectionHeader({ title, description }: { title: string; description: str
             <h1 className="text-[22px] leading-tight font-extrabold tracking-tight">{title}</h1>
             <p className="text-sm font-medium text-subdued">{description}</p>
         </header>
+    )
+}
+
+function GeneralSection() {
+    const [loginItem, setLoginItem] = useState<LoginItemInfo | null>(null)
+
+    useEffect(() => {
+        void window.musicBar.getOpenAtLogin().then(setLoginItem)
+    }, [])
+
+    const toggleOpenAtLogin = async () => {
+        if (!loginItem) return
+        await window.musicBar.setOpenAtLogin(!loginItem.enabled)
+        setLoginItem(await window.musicBar.getOpenAtLogin())
+    }
+
+    return (
+        <>
+            <SectionHeader title="General" description="How Music Bar starts." />
+            <div className="mt-6 flex items-center gap-4 rounded-xl bg-elevated p-4">
+                <div className="flex flex-1 flex-col gap-1">
+                    <span className="text-[15px] font-bold">Open at login</span>
+                    <span className="text-[13px] font-medium text-subdued">
+                        {loginItem?.available === false
+                            ? 'Only in the built app, not in development.'
+                            : 'Starts quietly in the menu bar, so ⌘⇧Space works right after you log in.'}
+                    </span>
+                </div>
+                <Switch
+                    label="Open at login"
+                    on={loginItem?.enabled ?? false}
+                    disabled={!loginItem?.available}
+                    onToggle={() => void toggleOpenAtLogin()}
+                />
+            </div>
+        </>
     )
 }
 
@@ -172,41 +221,6 @@ function BrowserRow({
             </div>
             {showSteps && <SetupSteps browser={browser} check={check} />}
         </section>
-    )
-}
-
-function Switch({
-    label,
-    on,
-    disabled,
-    title,
-    onToggle,
-}: {
-    label: string
-    on: boolean
-    disabled?: boolean
-    title?: string
-    onToggle: () => void
-}) {
-    return (
-        <button
-            type="button"
-            role="switch"
-            aria-checked={on}
-            aria-label={label}
-            title={title}
-            disabled={disabled}
-            onClick={onToggle}
-            className={`relative h-6 w-10 shrink-0 rounded-full transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-50 ${
-                on ? 'bg-accent' : 'bg-white/15 hover:bg-white/20'
-            }`}
-        >
-            <span
-                className={`absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform ${
-                    on ? 'translate-x-4' : ''
-                }`}
-            />
-        </button>
     )
 }
 

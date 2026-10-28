@@ -11,7 +11,7 @@ if (!root) throw new Error('Root element not found')
 createRoot(root).render(
     <StrictMode>
         {/* One renderer for every window: the setup window loads it with #setup
-            on the first run and #settings after. */}
-        {location.hash === '#setup' ? <Setup /> : location.hash === '#settings' ? <Settings /> : <App />}
+            on the first run and #settings (or #settings/<section>) after. */}
+        {location.hash === '#setup' ? <Setup /> : location.hash.startsWith('#settings') ? <Settings /> : <App />}
     </StrictMode>,
 )

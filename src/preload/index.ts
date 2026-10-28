@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type MusicBarApi } from '../shared/ipc'
+import { IPC, type MusicBarApi, type SettingsSection } from '../shared/ipc'
 
 function subscribe(channel: string, listener: () => void): () => void {
     const handler = () => listener()
@@ -26,7 +26,14 @@ const api: MusicBarApi = {
     startRadio: (source) => ipcRenderer.invoke(IPC.startRadio, source),
     startRadioFromSong: (song) => ipcRenderer.invoke(IPC.startRadioFromSong, song.videoId),
     showTab: (source) => ipcRenderer.invoke(IPC.showTab, source),
-    showSetup: () => ipcRenderer.send(IPC.setupShow),
+    showSetup: (section) => ipcRenderer.send(IPC.setupShow, section),
+    onSettingsSection: (listener) => {
+        const handler = (_event: unknown, section: SettingsSection) => listener(section)
+        ipcRenderer.on(IPC.settingsSection, handler)
+        return () => ipcRenderer.removeListener(IPC.settingsSection, handler)
+    },
+    getOpenAtLogin: () => ipcRenderer.invoke(IPC.loginItemGet),
+    setOpenAtLogin: (enabled) => ipcRenderer.invoke(IPC.loginItemSet, enabled),
     getSetup: () => ipcRenderer.invoke(IPC.setupGet),
     setBrowsers: (browsers) => ipcRenderer.invoke(IPC.setupSetBrowsers, browsers),
     checkBrowser: (browser) => ipcRenderer.invoke(IPC.setupCheck, browser),

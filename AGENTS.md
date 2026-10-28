@@ -66,6 +66,11 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/main/frontmost-app.ts` — reads and restores the frontmost app through
   AppKit (JXA), no Automation permission needed. Opening YouTube Music brings
   the browser forward; this puts the user's app back in front.
+- `src/main/login-item.ts` — open at login, as a LaunchAgent the app writes
+  to `~/Library/LaunchAgents/dev.shrey.music-bar.plist` (the file existing
+  is the setting). Not Electron's login item: on macOS 13+ it can't say the
+  app was opened at login. launchd passes `--login`, and a login launch
+  stays in the menu bar instead of showing the launcher. Packaged app only.
 - `src/main/log.ts` — the log file, `~/Library/Logs/Music Bar/main.log`
   ("Show Log File" in the menu bar menu), to ask users for when something
   breaks. Log user actions (`handleAction` in `index.ts` does it for IPC),
