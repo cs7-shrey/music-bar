@@ -145,6 +145,9 @@ export default function App() {
         const shortcut = event.metaKey && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]
         if (shortcut) {
             event.preventDefault()
+            // A held key repeats about every 30ms; each of those would be one
+            // more skip, queued behind the last.
+            if (event.repeat) return
             if (shortcut === 'loop') nowPlaying.toggleLoop()
             else if (shortcut === 'radio') startRadio()
             else nowPlaying.control(shortcut)
