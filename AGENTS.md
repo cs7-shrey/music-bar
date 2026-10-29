@@ -95,6 +95,13 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - Always dark: `nativeTheme.themeSource = 'dark'` in main. Do not add a light theme yet.
 - The launcher hides on blur and on Esc. Hiding through `hideLauncher()` also
   calls `app.hide()` so focus returns to the previous app.
+- The launcher must look like a popup to window managers, as Raycast's does:
+  borderless (`roundedCorners: false`, so no hidden close button) and marked
+  `AXSystemDialog` (`src/main/system-dialog.ts`, through `koffi`). Otherwise
+  AeroSpace manages it, gives it a workspace, and switches to that workspace
+  each time it opens. `koffi` loads a native binary, so it's left out of the
+  Vite bundle and copied into the package by `packageAfterCopy` in
+  `forge.config.ts`.
 - Renderer code never imports Electron; go through `window.musicBar`.
 - One renderer serves every window: `main.tsx` renders setup for `#setup`,
   settings for `#settings`, else the launcher.

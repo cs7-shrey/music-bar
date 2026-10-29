@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process'
+import { cpSync } from 'fs'
 import { join } from 'path'
 import type { ForgeConfig } from '@electron-forge/shared-types'
 import { VitePlugin } from '@electron-forge/plugin-vite'
@@ -9,7 +10,8 @@ const config: ForgeConfig = {
     packagerConfig: {
         name: 'Music Bar',
         appBundleId: 'dev.shrey.music-bar',
-        asar: true,
+        // Native binaries can't be loaded from inside the archive.
+        asar: { unpack: '**/*.node' },
         // Generated from assets/note.svg by `pnpm icons`.
         icon: 'assets/icon',
         extraResource: ['assets/trayTemplate.png', 'assets/trayTemplate@2x.png'],
@@ -41,6 +43,17 @@ const config: ForgeConfig = {
         new MakerZIP({}, ['darwin']),
     ],
     hooks: {
+        // The Vite plugin packages only the bundled code, not node_modules.
+        // koffi loads a native binary, so it isn't bundled (see
+        // vite.main.config.mjs) and is copied in here, with just the Mac
+        // binaries out of its 28MB of platforms.
+        packageAfterCopy: async (_config, buildPath) => {
+            const from = join(process.cwd(), 'node_modules/koffi')
+            const to = join(buildPath, 'node_modules/koffi')
+            for (const file of ['package.json', 'index.js', 'build/koffi/darwin_arm64', 'build/koffi/darwin_x64']) {
+                cpSync(join(from, file), join(to, file), { recursive: true })
+            }
+        },
         // Packaging renames Electron's app and edits its Info.plist and icon,
         // which breaks the ad-hoc signature Electron ships with. A downloaded
         // copy then fails Gatekeeper as "damaged". Re-sign ad-hoc over the

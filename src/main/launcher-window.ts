@@ -1,6 +1,7 @@
 import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { IPC } from '../shared/ipc'
+import { markAsSystemDialog } from './system-dialog'
 
 const WIDTH = 750
 const HEIGHT = 475
@@ -28,6 +29,11 @@ export function createLauncherWindow(): BrowserWindow {
         // NSPanel so the launcher can float over full-screen apps without
         // pulling the user to another Space.
         type: 'panel',
+        // Borderless, not just frameless: Electron gives a frameless window a
+        // hidden title bar and buttons for its rounded corners. Window
+        // managers count a window with a close button as theirs to manage
+        // (see system-dialog.ts). The renderer draws the corners instead.
+        roundedCorners: false,
         // Transparent so the renderer's rounded, solid panel defines the shape.
         transparent: true,
         backgroundColor: '#00000000',
@@ -39,6 +45,8 @@ export function createLauncherWindow(): BrowserWindow {
         },
     })
 
+    // Kept out of window managers' hands (see system-dialog.ts).
+    markAsSystemDialog(window)
     window.setAlwaysOnTop(true, 'floating')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
