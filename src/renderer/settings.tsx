@@ -122,7 +122,7 @@ function GeneralSection() {
                     <span className="text-[13px] font-medium text-subdued">
                         {loginItem?.available === false
                             ? 'Only in the built app, not in development.'
-                            : 'Starts quietly in the menu bar, so ⌥⇧Space works right after you log in.'}
+                            : 'Starts quietly in the menu bar, so ⌘⇧Space works right after you log in.'}
                     </span>
                 </div>
                 <Switch
@@ -226,10 +226,17 @@ function BrowserRow({
 
 // Every shortcut, as the launcher and main process define them (SHORTCUT in
 // index.ts, SHORTCUTS and the key handlers in App.tsx). Not changeable yet.
-const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string[] }[] }[] = [
+const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string[]; note?: string }[] }[] = [
     {
         title: 'Anywhere',
-        shortcuts: [{ label: 'Open Music Bar', keys: ['⌥', '⇧', 'Space'] }],
+        shortcuts: [
+            {
+                label: 'Open Music Bar',
+                keys: ['⌘', '⇧', 'Space'],
+                // Borrowed from macOS (system-shortcuts.ts); say so.
+                note: 'Replaces Siri’s “Ask about the active window” while Music Bar is running.',
+            },
+        ],
     },
     {
         title: 'Player',
@@ -265,9 +272,12 @@ function ShortcutsSection() {
                 <section key={title} className="mt-7">
                     <h2 className="mb-2 text-xs font-bold tracking-wider text-faint uppercase">{title}</h2>
                     <ul className="flex flex-col divide-y divide-white/[0.06] rounded-xl bg-elevated">
-                        {shortcuts.map(({ label, keys }) => (
-                            <li key={label} className="flex h-12 items-center justify-between gap-4 px-4">
-                                <span className="text-sm font-semibold">{label}</span>
+                        {shortcuts.map(({ label, keys, note }) => (
+                            <li key={label} className="flex min-h-12 items-center justify-between gap-4 px-4 py-2">
+                                <span className="flex flex-col gap-0.5">
+                                    <span className="text-sm font-semibold">{label}</span>
+                                    {note && <span className="text-[13px] font-medium text-subdued">{note}</span>}
+                                </span>
                                 <ShortcutPill keys={keys} />
                             </li>
                         ))}

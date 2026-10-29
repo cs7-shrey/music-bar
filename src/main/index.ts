@@ -18,8 +18,12 @@ import { getSettings, updateSettings } from './settings'
 import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 import { describe, logFile, logger } from './log'
 import { canOpenAtLogin, isOpenAtLogin, openedAtLogin, refreshOpenAtLogin, setOpenAtLogin } from './login-item'
+import { borrowSystemShortcut, returnSystemShortcuts } from './system-shortcuts'
 
-const SHORTCUT = 'Alt+Shift+Space'
+// macOS 27 gives ⌘⇧Space to Siri; Music Bar borrows it while running (see
+// system-shortcuts.ts). If that fails, ⌥⇧Space opens the launcher too.
+const SHORTCUT = 'Command+Shift+Space'
+const FALLBACK_SHORTCUT = 'Alt+Shift+Space'
 const SETTINGS_SHORTCUT = 'CommandOrControl+,'
 
 let tray: Tray | null = null
@@ -226,12 +230,19 @@ app.whenReady().then(() => {
     handleAction(IPC.startRadio, (source: TrackSource) => youtubeMusic.startRadio(source))
     handleAction(IPC.startRadioFromSong, (videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 
-    if (!globalShortcut.register(SHORTCUT, () => (needsSetup() ? showSetup() : toggleLauncher()))) {
-        log.warn(`couldn't register ${SHORTCUT}; another app may own it`)
+    const openFromShortcut = () => (needsSetup() ? showSetup() : toggleLauncher())
+    const borrowed = borrowSystemShortcut(SHORTCUT)
+    for (const shortcut of borrowed ? [SHORTCUT] : [SHORTCUT, FALLBACK_SHORTCUT]) {
+        if (!globalShortcut.register(shortcut, openFromShortcut)) {
+            log.warn(`couldn't register ${shortcut}; another app may own it`)
+        }
     }
 })
 
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+    returnSystemShortcuts()
+})
 
 // Background app: closing the launcher must never quit it.
 app.on('window-all-closed', () => {})

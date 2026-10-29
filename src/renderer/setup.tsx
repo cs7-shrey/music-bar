@@ -76,7 +76,7 @@ export default function Setup() {
                         <p className="text-sm font-medium text-subdued">
                             {step === 'choose' ? (
                                 <>
-                                    Control YouTube Music from anywhere with <Keys>⌥⇧Space</Keys>. Choose the browsers you
+                                    Control YouTube Music from anywhere with <Keys>⌘⇧Space</Keys>. Choose the browsers you
                                     play it in.
                                 </>
                             ) : (
@@ -94,7 +94,7 @@ export default function Setup() {
                                 <div className="flex flex-1 flex-col gap-0.5">
                                     <span className="text-sm font-bold">Open at login</span>
                                     <span className="text-xs font-medium text-subdued">
-                                        Starts quietly in the menu bar, so <Keys>⌥⇧Space</Keys> always works.
+                                        Starts quietly in the menu bar, so <Keys>⌘⇧Space</Keys> always works.
                                     </span>
                                 </div>
                                 <Switch

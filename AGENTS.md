@@ -1,6 +1,6 @@
 # Music Bar
 
-Raycast-style launcher (⌥⇧Space) for controlling YouTube Music playing in a
+Raycast-style launcher (⌘⇧Space) for controlling YouTube Music playing in a
 Chromium browser (Brave first, also Chrome and Helium). macOS only.
 
 ## Package manager
@@ -74,6 +74,12 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   is the setting). Not Electron's login item: on macOS 13+ it can't say the
   app was opened at login. launchd passes `--login`, and a login launch
   stays in the menu bar instead of showing the launcher. Packaged app only.
+- `src/main/system-shortcuts.ts` — macOS 27 gives ⌘⇧Space to Siri, and a
+  system shortcut beats an app's. Music Bar turns the system one off while it
+  runs and back on at quit, through private CoreGraphics calls
+  (`CGSSetSymbolicHotKeyEnabled`, as AltTab does for ⌘Tab) found by key
+  combination, not id. It's system-wide and outlives a crash until the next
+  launch or logout. If it fails, ⌥⇧Space is registered as well.
 - `src/main/log.ts` — the log file, `~/Library/Logs/Music Bar/main.log`
   ("Show Log File" in the menu bar menu), to ask users for when something
   breaks. Log user actions (`handleAction` in `index.ts` does it for IPC),

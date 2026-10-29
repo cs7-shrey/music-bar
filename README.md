@@ -1,6 +1,6 @@
 # Music Bar
 
-A Raycast-style launcher for YouTube Music on the Mac. Press ⌥⇧Space
+A Raycast-style launcher for YouTube Music on the Mac. Press ⌘⇧Space
 anywhere to see what's playing, skip, loop, start a radio, or search for a
 song and play it, without leaving what you're doing.
 
@@ -38,7 +38,7 @@ in **Settings…** (⌘,) from the music note in the menu bar.
 
 ## Use
 
-Press **⌥⇧Space** to open Music Bar. Type to search.
+Press **⌘⇧Space** to open Music Bar. Type to search.
 
 | Keys | Does |
 |---|---|
@@ -52,6 +52,10 @@ Press **⌥⇧Space** to open Music Bar. Type to search.
 | esc | Back, clear, or close |
 
 Music Bar can open at login, quietly in the menu bar (Settings → General).
+
+On macOS 27, ⌘⇧Space belongs to Siri's "Ask about the active window".
+Music Bar switches that shortcut off while it runs and back on when it
+quits. Your setting in System Settings isn't changed.
 
 Browsers don't let a page start sound until you've clicked in it once. If
 Music Bar can't start playback, it offers **Show Tab**: click play there
