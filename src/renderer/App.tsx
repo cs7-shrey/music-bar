@@ -335,7 +335,7 @@ export default function App() {
                 </div>
             </header>
 
-            <Command.List className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+            <Command.List className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-2">
                 {!trimmed && commands}
                 {!trimmed && browserRows}
 

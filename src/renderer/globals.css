@@ -33,6 +33,21 @@ body,
     background: transparent;
 }
 
+/*
+ * With a mouse connected, macOS shows scroll bars all the time, white unless
+ * told otherwise. Dark ones, to match. The launcher hides its own (see
+ * .no-scrollbar).
+ */
+html {
+    color-scheme: dark;
+    scrollbar-color: rgb(255 255 255 / 0.2) transparent;
+}
+
+/* Scrolls without a bar, for the launcher list: it's driven by the keyboard, like Spotlight's. */
+.no-scrollbar {
+    scrollbar-width: none;
+}
+
 body {
     font-family: var(--font-sans);
     font-feature-settings: "tnum" 0;
