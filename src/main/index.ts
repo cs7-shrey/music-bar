@@ -71,8 +71,9 @@ if (!app.requestSingleInstanceLock()) {
     app.quit()
 }
 
-// Until browsers are chosen, every way into Music Bar leads to setup.
-const needsSetup = () => getSettings().browsers === null
+// Until browsers are chosen, and then until Music Bar is first opened with
+// its shortcut, every way into Music Bar leads to setup.
+const needsSetup = () => getSettings().browsers === null || getSettings().awaitingShortcut
 
 function openMusicBar(): void {
     // An open setup window comes forward, e.g. on a click on the Dock icon
@@ -207,6 +208,7 @@ app.whenReady().then(() => {
             })),
         ),
         chosen: getSettings().browsers,
+        awaitingShortcut: getSettings().awaitingShortcut,
     }))
     handleAction(IPC.setupSetBrowsers, (browsers: BrowserName[]) => updateSettings({ browsers }))
     ipcMain.handle(IPC.setupCheck, (_event, browser: BrowserName) => youtubeMusic.checkBrowser(browser))
@@ -218,8 +220,8 @@ app.whenReady().then(() => {
         shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'),
     )
     ipcMain.on(IPC.setupFinish, () => {
+        updateSettings({ awaitingShortcut: true })
         log.info('setup finished', getSettings())
-        void closeSetup().then(showLauncher)
     })
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
@@ -230,7 +232,17 @@ app.whenReady().then(() => {
     handleAction(IPC.startRadio, (source: TrackSource) => youtubeMusic.startRadio(source))
     handleAction(IPC.startRadioFromSong, (videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 
-    const openFromShortcut = () => (needsSetup() ? showSetup() : toggleLauncher())
+    const openFromShortcut = () => {
+        if (getSettings().browsers === null) return showSetup()
+        if (getSettings().awaitingShortcut) {
+            // Setup's last screen asked for this press: the user has the
+            // shortcut now, so setup is over.
+            updateSettings({ awaitingShortcut: false })
+            log.info('opened with the shortcut for the first time')
+            return void closeSetup().then(showLauncher)
+        }
+        toggleLauncher()
+    }
     const borrowed = borrowSystemShortcut(SHORTCUT)
     for (const shortcut of borrowed ? [SHORTCUT] : [SHORTCUT, FALLBACK_SHORTCUT]) {
         if (!globalShortcut.register(shortcut, openFromShortcut)) {

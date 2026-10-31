@@ -56,7 +56,10 @@ export const IPC = {
     setupOpenBrowser: 'setup:open-browser',
     /** renderer → main (invoke): open System Settings → Privacy & Security → Automation. */
     setupOpenAutomationSettings: 'setup:open-automation-settings',
-    /** renderer → main: close the setup window and show the launcher. */
+    /**
+     * renderer → main: setup's checks are done. Setup stays on its last
+     * screen until the user opens Music Bar with the shortcut.
+     */
     setupFinish: 'setup:finish',
 } as const
 
@@ -128,6 +131,8 @@ export interface SetupInfo {
     installed: InstalledBrowser[]
     /** Browsers chosen in setup; null before setup. */
     chosen: BrowserName[] | null
+    /** Setup is done and waits for the first ⌘⇧Space. */
+    awaitingShortcut: boolean
 }
 
 export interface BrowserStatus {

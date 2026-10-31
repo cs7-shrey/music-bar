@@ -26,7 +26,8 @@ export function showSetup(section?: SettingsSection): void {
         return
     }
 
-    const page = getSettings().browsers === null ? 'setup' : 'settings'
+    const { browsers, awaitingShortcut } = getSettings()
+    const page = browsers === null || awaitingShortcut ? 'setup' : 'settings'
     const hash = page === 'settings' && section ? `settings/${section}` : page
     window = new BrowserWindow({
         // Setup is one narrow column. Settings has a sidebar of sections and

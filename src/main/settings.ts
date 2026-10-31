@@ -9,9 +9,14 @@ import type { BrowserName } from '../shared/ipc'
 export interface Settings {
     /** Browsers Music Bar may talk to; null until chosen in setup. */
     browsers: BrowserName[] | null
+    /**
+     * Setup is done but Music Bar hasn't been opened with its shortcut yet.
+     * Until it is, setup stays open on its last screen, which teaches it.
+     */
+    awaitingShortcut: boolean
 }
 
-const DEFAULTS: Settings = { browsers: null }
+const DEFAULTS: Settings = { browsers: null, awaitingShortcut: false }
 
 let cached: Settings | null = null
 

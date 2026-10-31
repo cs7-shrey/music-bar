@@ -6,7 +6,8 @@ import markUrl from '../../assets/mark.svg'
 
 // The setup window: pick the browsers Music Bar may use, then walk each one
 // through opening it, allowing Automation, and turning on JavaScript from
-// Apple Events, with live checks.
+// Apple Events, with live checks. Last, it asks for ⌘⇧Space, and stays on
+// that screen until Music Bar is opened with it (main closes the window).
 
 // Pause between rounds of checks.
 const CHECK_INTERVAL_MS = 1500
@@ -32,7 +33,7 @@ export const isPrompting = (check: BrowserCheck) =>
 export default function Setup() {
     const [installed, setInstalled] = useState<InstalledBrowser[] | null>(null)
     const [chosen, setChosen] = useState<BrowserName[]>([])
-    const [step, setStep] = useState<'choose' | 'connect'>('choose')
+    const [step, setStep] = useState<'choose' | 'connect' | 'ready'>('choose')
     // On unless turned off here; null where the app can't open at login (development).
     const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null)
     // Checks run only on the connect step; choosing a browser asks nothing yet.
@@ -46,6 +47,7 @@ export default function Setup() {
             const available = info.installed.map((item) => item.browser)
             // A single browser needs no choosing.
             setChosen(info.chosen?.filter((b) => available.includes(b)) ?? (available.length === 1 ? available : []))
+            if (info.awaitingShortcut) setStep('ready')
         })
         void window.musicBar.getOpenAtLogin().then((info) => setOpenAtLogin(info.available ? true : null))
     }, [])
@@ -62,6 +64,11 @@ export default function Setup() {
         setStep('connect')
     }
 
+    const finish = () => {
+        window.musicBar.finishSetup()
+        setStep('ready')
+    }
+
     return (
         <div className="flex h-full flex-col bg-base text-white">
             {/* Room for the traffic lights, and something to drag the window by. */}
@@ -71,7 +78,11 @@ export default function Setup() {
                     <img src={markUrl} alt="" className="size-14" draggable={false} />
                     <div className="flex flex-col gap-1.5">
                         <h1 className="text-[26px] leading-tight font-extrabold tracking-tight">
-                            {step === 'choose' ? 'Welcome to Music Bar' : 'Connect your browsers'}
+                            {step === 'choose'
+                                ? 'Welcome to Music Bar'
+                                : step === 'connect'
+                                  ? 'Connect your browsers'
+                                  : 'You’re all set'}
                         </h1>
                         <p className="text-sm font-medium text-subdued">
                             {step === 'choose' ? (
@@ -79,8 +90,12 @@ export default function Setup() {
                                     Control YouTube Music from anywhere with <Keys>⌘⇧Space</Keys>. Choose the browsers you
                                     play it in.
                                 </>
-                            ) : (
+                            ) : step === 'connect' ? (
                                 'Music Bar controls YouTube Music through your browser. Each one needs a one-time setup.'
+                            ) : (
+                                <>
+                                    Press <Keys>⌘⇧Space</Keys> to open Music Bar. It works from any app.
+                                </>
                             )}
                         </p>
                     </div>
@@ -105,8 +120,10 @@ export default function Setup() {
                             </div>
                         )}
                     </>
-                ) : (
+                ) : step === 'connect' ? (
                     <ConnectBrowsers browsers={chosen} icons={installed ?? []} checks={checks} />
+                ) : (
+                    <ShortcutKeys />
                 )}
 
                 <footer className="mt-6 flex shrink-0 items-center justify-between gap-4">
@@ -116,6 +133,17 @@ export default function Setup() {
                             <PrimaryButton disabled={chosen.length === 0} onClick={() => void next()}>
                                 Continue
                             </PrimaryButton>
+                        </>
+                    ) : step === 'ready' ? (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setStep('connect')}
+                                className="rounded-full px-3 py-2 text-sm font-bold text-subdued transition hover:text-white focus-visible:outline-2 focus-visible:outline-white"
+                            >
+                                Back
+                            </button>
+                            <span className="text-xs font-medium text-faint">Try it now.</span>
                         </>
                     ) : (
                         <>
@@ -130,13 +158,13 @@ export default function Setup() {
                                 {!anyReady && (
                                     <button
                                         type="button"
-                                        onClick={() => window.musicBar.finishSetup()}
+                                        onClick={finish}
                                         className="rounded-full px-3 py-2 text-sm font-bold text-subdued transition hover:text-white focus-visible:outline-2 focus-visible:outline-white"
                                     >
                                         Skip for now
                                     </button>
                                 )}
-                                <PrimaryButton disabled={!anyReady} onClick={() => window.musicBar.finishSetup()}>
+                                <PrimaryButton disabled={!anyReady} onClick={finish}>
                                     Done
                                 </PrimaryButton>
                             </span>
@@ -276,6 +304,24 @@ function ConnectBrowsers({
                     icon={icons.find((item) => item.browser === browser)?.icon ?? null}
                     check={checks[browser] ?? { state: null, since: null }}
                 />
+            ))}
+        </div>
+    )
+}
+
+/** ⌘⇧Space as big key caps, for the last screen. */
+function ShortcutKeys() {
+    return (
+        <div className="flex flex-1 items-center justify-center gap-3" aria-label="Command Shift Space">
+            {['⌘', '⇧', 'Space'].map((key) => (
+                <kbd
+                    key={key}
+                    className={`flex h-20 items-center justify-center rounded-2xl bg-elevated font-sans text-3xl font-bold text-white shadow-[inset_0_-4px_0_rgba(0,0,0,0.4)] ring-1 ring-white/10 ring-inset ${
+                        key === 'Space' ? 'w-48' : 'w-20'
+                    }`}
+                >
+                    {key}
+                </kbd>
             ))}
         </div>
     )

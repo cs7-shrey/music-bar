@@ -59,8 +59,10 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   Automation, allow JavaScript from Apple Events). A normal window, not the
   launcher panel, because setup sends the user to browser menus and macOS
   prompts. It shows a Dock icon while open. Checks run one browser at a time
-  so permission prompts come one by one. Until browsers are chosen, every
-  way into the app opens setup. After that the same window opens as
+  so permission prompts come one by one. Setup ends on a screen that asks
+  for ⌘⇧Space (`awaitingShortcut` in settings); the first press closes
+  setup and opens the launcher. Until browsers are chosen, and then until
+  that first press, every way into the app opens setup. After that the same window opens as
   settings (`src/renderer/settings.tsx`, "Settings…" in the menu bar menu):
   a sidebar of sections (`SECTIONS`; add new kinds of settings there).
   Browsers switch on and off there, saved at once, with the same checks. To test a first run: quit Music Bar, then
