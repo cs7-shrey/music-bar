@@ -82,7 +82,9 @@ function openMusicBar(): void {
 }
 
 function openSettings(section?: SettingsSection): void {
-    hideLauncher()
+    // Settings takes focus next. app.hide() would switch to the previous app
+    // a moment after settings appears, and take focus away from it.
+    hideLauncher({ returnFocus: false })
     showSetup(section)
 }
 

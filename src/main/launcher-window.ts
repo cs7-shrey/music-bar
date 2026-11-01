@@ -105,11 +105,15 @@ export function focusLauncher(): void {
     if (window?.isVisible()) window.focus()
 }
 
-export function hideLauncher(): void {
+/**
+ * Hides the launcher and hands focus back to whatever app was frontmost
+ * before it opened. Pass `returnFocus: false` when another Music Bar window
+ * takes focus next.
+ */
+export function hideLauncher({ returnFocus = true } = {}): void {
     if (!window?.isVisible()) return
     window.hide()
-    // Hand focus back to whatever app was frontmost before we opened.
-    if (process.platform === 'darwin') app.hide()
+    if (returnFocus && process.platform === 'darwin') app.hide()
 }
 
 export function toggleLauncher(): void {

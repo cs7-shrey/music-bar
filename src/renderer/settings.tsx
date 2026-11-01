@@ -41,9 +41,10 @@ export default function Settings() {
     )
 
     useEffect(() => {
-        // A settings window closes with Esc or ⌘W.
+        // ⌘W closes it, like any window. Not Esc: settings is a normal
+        // window, not the launcher.
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape' || (event.metaKey && event.key.toLowerCase() === 'w')) window.close()
+            if (event.metaKey && event.key.toLowerCase() === 'w') window.close()
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
