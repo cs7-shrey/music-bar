@@ -33,7 +33,9 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/main/youtube-music.ts` — the YouTube Music bridge. Runs JavaScript in
   YT Music tabs through each browser's AppleScript `execute javascript`
   (works on background tabs). Requires View → Developer → Allow JavaScript
-  from Apple Events in each browser. No accessibility tree: Chromium only
+  from Apple Events in each browser. Scripts address each browser by bundle
+  id (`BUNDLE_IDS`), never by name: macOS can resolve a name like "Brave
+  Browser" to another app (Helium, on one Mac). No accessibility tree: Chromium only
   exposes the front tab's page to it.
   Scripts run in the browser's isolated world: DOM and cookies are shared
   with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`

@@ -13,6 +13,19 @@ import { describe, logger } from './log'
 // Events turned on once.
 
 const BROWSERS: BrowserName[] = ['Brave Browser', 'Google Chrome', 'Helium']
+
+// Each browser's bundle id. Scripts address browsers by id, never by name:
+// macOS can resolve an app name to a different app (on one Mac, "Brave
+// Browser" while Brave wasn't running turned out to mean Helium), and then
+// Music Bar would drive, and ask permission for, a browser nobody chose.
+const BUNDLE_IDS: Record<BrowserName, string> = {
+    'Brave Browser': 'com.brave.Browser',
+    'Google Chrome': 'com.google.Chrome',
+    Helium: 'net.imput.helium',
+}
+
+/** The browser as an AppleScript application reference, by bundle id. */
+const appRef = (browser: BrowserName) => `application id ${asString(BUNDLE_IDS[browser])}`
 const YT_MUSIC_URL = 'https://music.youtube.com/'
 
 // Chromium holds back loading media in a hidden page that has never played
@@ -104,6 +117,12 @@ const appPaths = new Map(
         return path ? [[name, path] as const] : []
     }),
 )
+
+/** Launches a browser, found by bundle id (see BUNDLE_IDS). */
+export function openBrowser(browser: BrowserName): void {
+    if (!appPaths.has(browser)) return
+    execFile('open', ['-b', BUNDLE_IDS[browser]])
+}
 
 /** Supported browsers on this Mac, with where each is installed. */
 export function installedBrowsers(): { browser: BrowserName; path: string }[] {
@@ -220,9 +239,9 @@ set sep to character id 9
 set out to ""
 set skipIds to {${skipIds.join(', ')}}
 set ytTabs to 0
-if application ${asString(browser)} is running then
+if ${appRef(browser)} is running then
     set out to "running" & linefeed
-    tell application ${asString(browser)}
+    tell ${appRef(browser)}
         repeat with w in windows
             repeat with t in (tabs of w whose URL starts with ${asString(YT_MUSIC_URL)})
                 set ytTabs to ytTabs + 1
@@ -445,7 +464,7 @@ async function executeInTab(source: TrackSource, js: string, timeoutSeconds = 3)
     }
     return runAppleScript(`
 with timeout of ${timeoutSeconds} seconds
-    tell application ${asString(source.browser)}
+    tell ${appRef(source.browser)}
         execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
     end tell
 end timeout`)
@@ -513,7 +532,7 @@ async function showTabUntil(
 ): Promise<void> {
     const tell = (body: string) =>
         runAppleScript(`
-tell application ${asString(source.browser)}
+tell ${appRef(source.browser)}
     set w to window id ${source.windowId}
 ${body}
 end tell`)
@@ -659,7 +678,7 @@ export async function showTab(source: TrackSource): Promise<void> {
         throw new Error('Invalid tab')
     }
     await runAppleScript(`
-tell application ${asString(source.browser)}
+tell ${appRef(source.browser)}
     set w to window id ${source.windowId}
     set i to 0
     repeat with t in tabs of w
@@ -877,7 +896,7 @@ export async function openYouTubeMusic(browser: BrowserName, afterTabMade?: () =
     if (!enabledBrowsers().includes(browser)) throw new Error('Unsupported browser')
     await enqueue(async () => {
         const created = await runAppleScript(`
-tell application ${asString(browser)}
+tell ${appRef(browser)}
     if (count of windows) is 0 then
         set w to make new window
         set URL of active tab of w to ${asString(YT_MUSIC_HOME)}

@@ -1,4 +1,3 @@
-import { execFile } from 'child_process'
 import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type NativeImage } from 'electron'
 import { join } from 'path'
 import { IPC, type BrowserName, type PlayerControl, type SettingsSection, type TrackSource } from '../shared/ipc'
@@ -212,10 +211,7 @@ app.whenReady().then(() => {
     }))
     handleAction(IPC.setupSetBrowsers, (browsers: BrowserName[]) => updateSettings({ browsers }))
     ipcMain.handle(IPC.setupCheck, (_event, browser: BrowserName) => youtubeMusic.checkBrowser(browser))
-    handleAction(IPC.setupOpenBrowser, (browser: BrowserName) => {
-        if (!youtubeMusic.installedBrowsers().some((installed) => installed.browser === browser)) return
-        execFile('open', ['-a', browser])
-    })
+    handleAction(IPC.setupOpenBrowser, (browser: BrowserName) => youtubeMusic.openBrowser(browser))
     ipcMain.handle(IPC.setupOpenAutomationSettings, () =>
         shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'),
     )
