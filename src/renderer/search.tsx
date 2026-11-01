@@ -13,31 +13,40 @@ const search = (query: string) => window.musicBar.search(query)
 /** Live suggestions and songs for what is being typed. */
 export const useSuggestions = (query: string) => useSearchRequest(query, suggest, SUGGEST_DEBOUNCE_MS)
 
-/** The full search for a submitted query. */
-export const useFullSearch = (query: string) => useSearchRequest(query, search, 0)
+/**
+ * The full search for a submitted query. A new `attempt` runs the same query
+ * again, e.g. once the tab it failed in has loaded.
+ */
+export const useFullSearch = (query: string, attempt = 0) => useSearchRequest(query, search, 0, attempt)
 
-function useSearchRequest(query: string, request: (query: string) => Promise<SearchResults>, debounceMs: number) {
-    const [settled, setSettled] = useState<{ query: string; results: SearchResults } | null>(null)
+function useSearchRequest(
+    query: string,
+    request: (query: string) => Promise<SearchResults>,
+    debounceMs: number,
+    attempt = 0,
+) {
+    const [settled, setSettled] = useState<{ key: string; results: SearchResults } | null>(null)
     const trimmed = query.trim()
+    const key = `${attempt}:${trimmed}`
 
     useEffect(() => {
         if (!trimmed) return
         let cancelled = false
         const timer = setTimeout(async () => {
             const results = await request(trimmed)
-            if (!cancelled) setSettled({ query: trimmed, results })
+            if (!cancelled) setSettled({ key, results })
         }, debounceMs)
         return () => {
             cancelled = true
             clearTimeout(timer)
         }
-    }, [trimmed, request, debounceMs])
+    }, [trimmed, key, request, debounceMs])
 
     // The previous query's results stay up while the next ones load, so the
     // list does not blink empty on every keystroke.
     return {
         results: trimmed ? (settled?.results ?? null) : null,
-        loading: trimmed !== '' && settled?.query !== trimmed,
+        loading: trimmed !== '' && settled?.key !== key,
     }
 }
 

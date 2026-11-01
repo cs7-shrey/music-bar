@@ -55,9 +55,14 @@ export default function App() {
     const artwork = useArtwork(track?.artworkUrl ?? null)
 
     const trimmed = query.trim()
-    // No suggestions without a YouTube Music tab to ask; the rows offer to open one.
-    const live = useSuggestions(submitted === null && !nowPlaying.needsTab ? query : '')
-    const full = useFullSearch(submitted ?? '')
+    // The tab searches run in was unloaded by its browser: its scripts time
+    // out, so search offers to load it first.
+    const tabUnloaded = nowPlaying.state?.status === 'unloaded'
+    // Bumped to run the same full search again once the tab has loaded.
+    const [searchAttempt, setSearchAttempt] = useState(0)
+    // No suggestions without a usable YouTube Music tab to ask; the rows offer to open or load one.
+    const live = useSuggestions(submitted === null && !nowPlaying.needsTab && !tabUnloaded ? query : '')
+    const full = useFullSearch(submitted ?? '', searchAttempt)
 
     const reset = () => {
         setQuery('')
@@ -272,6 +277,27 @@ export default function App() {
         submit(searchQuery)
     }
 
+    // The same for an unloaded tab: load it, then search.
+    const loadAndSearch = async (searchQuery: string) => {
+        await nowPlaying.loadTab()
+        submit(searchQuery)
+        setSearchAttempt((attempt) => attempt + 1)
+    }
+    const loadAndSearchRow = (searchQuery: string) =>
+        nowPlaying.state?.status === 'unloaded' && (
+            <Command.Group heading="Search">
+                <CommandRow
+                    // The search row's value, so ↵ picks it.
+                    value={searchValue(searchQuery)}
+                    icon={<Play fill="currentColor" strokeWidth={0} />}
+                    title={`Load YouTube Music in ${BROWSER_NAMES[nowPlaying.state.source.browser]}`}
+                    subtitle={nowPlaying.loadingTab ? 'Loading…' : `The tab is inactive. Then search “${searchQuery}”`}
+                    muted={nowPlaying.loadingTab}
+                    onSelect={() => void loadAndSearch(searchQuery)}
+                />
+            </Command.Group>
+        )
+
     // Open browsers that can't be used. When there are any, the empty screen
     // lists every open browser's status and the footer flags the first one.
     const problems = nowPlaying.browsers.filter((browser) => BROWSER_STATES[browser.state].problem)
@@ -344,7 +370,9 @@ export default function App() {
 
                 {trimmed && submitted === null && (
                     <>
-                        {nowPlaying.needsTab ? (
+                        {tabUnloaded ? (
+                            loadAndSearchRow(trimmed)
+                        ) : nowPlaying.needsTab ? (
                             nowPlaying.openable.length > 0 ? (
                                 <Command.Group heading="Search">
                                     {nowPlaying.openable.map((browser, index) => (
@@ -388,10 +416,13 @@ export default function App() {
                     </>
                 )}
 
-                {submitted !== null && (
+                {submitted !== null && full.results?.status !== 'ok' && tabUnloaded && loadAndSearchRow(submitted)}
+                {submitted !== null && !(full.results?.status !== 'ok' && tabUnloaded) && (
                     <Command.Group heading={`Songs for “${submitted}”`}>
-                        {full.results === null && <ListNote>Searching…</ListNote>}
-                        {full.results?.status === 'error' && <ListNote>{full.results.message}</ListNote>}
+                        {(full.results === null || (full.loading && full.results.status === 'error')) && (
+                            <ListNote>Searching…</ListNote>
+                        )}
+                        {full.results?.status === 'error' && !full.loading && <ListNote>{full.results.message}</ListNote>}
                         {full.results?.status === 'ok' && full.results.songs.length === 0 && (
                             <ListNote>No songs found</ListNote>
                         )}
