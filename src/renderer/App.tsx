@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { Command } from 'cmdk'
 import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
-import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying } from './now-playing'
+import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying, WAITING } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 import markUrl from '../../assets/mark.svg'
 
@@ -125,6 +125,8 @@ export default function App() {
     // Debounced inside nowPlaying.startRadio, so the row, ⌘R and repeats of
     // either start one radio.
     const startRadio = () => {
+        // Waits for the state to catch up; nowPlaying runs it then.
+        if (nowPlaying.syncing) return nowPlaying.startRadio()
         if (!track || isAd) return
         nowPlaying.startRadio()
         setNotice(`Starting a radio from “${track.title}”`)
@@ -153,7 +155,7 @@ export default function App() {
             // A held key repeats about every 30ms; each of those would be one
             // more skip, queued behind the last.
             if (event.repeat) return
-            if (shortcut === 'loop') nowPlaying.toggleLoop()
+            if (shortcut === 'loop') nowPlaying.toggleLoop('list')
             else if (shortcut === 'radio') startRadio()
             else nowPlaying.control(shortcut)
             return
@@ -228,8 +230,9 @@ export default function App() {
                           ? `“${track.title}” · opens the tab for a moment to load it`
                           : `“${track.title}”`
                 }
-                muted={!track}
-                onSelect={nowPlaying.togglePlay}
+                muted={!track && !nowPlaying.syncing}
+                waiting={nowPlaying.queued.get('play') === 'list'}
+                onSelect={() => nowPlaying.togglePlay('list')}
             />
         )
 
@@ -253,8 +256,9 @@ export default function App() {
                 shortcut="⌘O"
                 // Dimmed rather than skipped: a missing row would push the
                 // selection onto a placeholder while the track loads.
-                muted={!track || isAd}
-                onSelect={nowPlaying.toggleLoop}
+                muted={(!track && !nowPlaying.syncing) || isAd}
+                waiting={nowPlaying.queued.get('loop') === 'list'}
+                onSelect={() => nowPlaying.toggleLoop('list')}
             />
             <CommandRow
                 value={RADIO_COMMAND}
@@ -264,7 +268,8 @@ export default function App() {
                     isAd ? 'Not available during ads' : track ? `A mix based on “${track.title}”` : 'Nothing is playing'
                 }
                 shortcut="⌘R"
-                muted={!track || isAd}
+                muted={(!track && !nowPlaying.syncing) || isAd}
+                waiting={nowPlaying.queued.has('radio')}
                 onSelect={startRadio}
             />
         </Command.Group>
@@ -479,6 +484,7 @@ function CommandRow({
     badge,
     shortcut,
     muted,
+    waiting,
     onSelect,
 }: {
     value: string
@@ -488,6 +494,8 @@ function CommandRow({
     badge?: string
     shortcut?: string
     muted?: boolean
+    /** Pressed while the launcher's state was catching up; runs once it has. */
+    waiting?: boolean
     onSelect?: () => void
 }) {
     return (
@@ -496,12 +504,16 @@ function CommandRow({
             onSelect={onSelect}
             className={`group flex h-12 items-center gap-3 rounded-md px-2 data-[selected=false]:hover:bg-white/[0.04] data-[selected=true]:bg-white/[0.08] ${muted ? 'opacity-50' : ''}`}
         >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-white [&>svg]:size-[18px]">
+            <span
+                className={`flex size-9 shrink-0 items-center justify-center rounded-full bg-highlight text-white transition [&>svg]:size-[18px] ${waiting ? WAITING : ''}`}
+            >
                 {icon}
             </span>
             {/* The title keeps its width; a long subtitle truncates instead. */}
             <span className="shrink-0 whitespace-nowrap text-[15px] font-semibold">{title}</span>
-            <span className="min-w-0 truncate text-[13px] font-medium text-subdued">{subtitle}</span>
+            <span className="min-w-0 truncate text-[13px] font-medium text-subdued">
+                {waiting ? 'Catching up with YouTube Music…' : subtitle}
+            </span>
             <span className="ml-auto flex shrink-0 items-center gap-3">
                 {badge && (
                     <span className="rounded-full bg-white/[0.07] px-2.5 py-0.5 text-[11px] font-bold text-subdued">

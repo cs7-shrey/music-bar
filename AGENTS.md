@@ -160,3 +160,8 @@ Also:
 - Every action bumps `actionSeq`, so reads that started before it are
   discarded and can't overwrite the optimistic UI.
 - Search requests are debounced too (200ms, `useSuggestions` in `search.tsx`).
+- Until the first read after each open lands (`syncing`), the card shows
+  state from the last open. Actions that depend on it (play/pause, loop,
+  radio) are queued instead (`queue`): the button stays pressed, a second
+  press does nothing, and the action runs on the fresh state. So ↵ on
+  "Pause" right after a media key started playback pauses.

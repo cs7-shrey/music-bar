@@ -24,11 +24,22 @@ const STALE_DIM_DELAY_MS = 300
 const TOGGLE_DEBOUNCE_MS = 300
 // How long a skip button shows as pressed, so ⌘H/⌘L look like a click.
 const PRESS_FLASH_MS = 160
+// A pressed button whose action waits for the launcher's first read: a white
+// arc spins around it, so the press visibly registered. For round buttons.
+export const WAITING =
+    "relative after:pointer-events-none after:absolute after:-inset-[3px] after:animate-spin after:rounded-full after:border-2 after:border-transparent after:border-t-white/60 after:content-['']"
 // How long ⌘ is held alone before the player buttons show their shortcuts.
 // Long enough that a quick ⌘H doesn't flash them.
 const SHORTCUT_HINT_DELAY_MS = 400
 
 type Toggle = 'play' | 'loop'
+/** An action pressed before the launcher's first read came back. */
+export type QueuedAction = 'play' | 'loop' | 'radio'
+/**
+ * Where an action was pressed, so a queued one shows on that button: the
+ * card's controls, or the command list (a row, ↵ or a shortcut).
+ */
+export type PressedOn = 'card' | 'list'
 
 const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.artist
 
@@ -62,8 +73,30 @@ export function useNowPlaying() {
     // Null until the first full read reports them.
     const [browsers, setBrowsers] = useState<BrowserStatus[] | null>(null)
 
+    // From each show until its first read lands, the card shows state from the
+    // last time the launcher was open. Play, loop and radio pressed meanwhile
+    // wait for that read and then act on what it found: ↵ on "Pause" right
+    // after playing from a media key must pause, not play.
+    const [syncing, setSyncing] = useState(true)
+    const syncingRef = useRef(true)
+    const queuedRef = useRef(new Map<QueuedAction, PressedOn>())
+    const [queued, setQueued] = useState<ReadonlyMap<QueuedAction, PressedOn>>(new Map())
+
+    /** Holds an action for the first read; pressing it again changes nothing. */
+    const queue = (action: QueuedAction, on: PressedOn) => {
+        if (queuedRef.current.has(action)) return
+        queuedRef.current.set(action, on)
+        setQueued(new Map(queuedRef.current))
+    }
+    const clearQueue = useCallback(() => {
+        queuedRef.current.clear()
+        setQueued(new Map())
+    }, [])
+
     const accept = useCallback((next: NowPlayingState) => {
         awaitingFreshRead.current = false
+        syncingRef.current = false
+        setSyncing(false)
         setState(next)
         setStale(false)
         if (next.browsers) setBrowsers(next.browsers)
@@ -91,6 +124,9 @@ export function useNowPlaying() {
             clearTimeout(timer)
             clearTimeout(dimTimer)
             awaitingFreshRead.current = true
+            syncingRef.current = true
+            setSyncing(true)
+            clearQueue()
             setStale(false)
         }
         const start = async () => {
@@ -117,7 +153,7 @@ export function useNowPlaying() {
             offShown()
             offHidden()
         }
-    }, [read, accept])
+    }, [read, accept, clearQueue])
 
     const applyOptimistic = (optimistic: (track: Track) => Track) => {
         actionSeq.current++
@@ -232,25 +268,29 @@ export function useNowPlaying() {
         )
     }
 
-    const togglePlay = () =>
-        debouncedToggle(
-            'play',
-            (current) => ({ ...current, isPlaying: !current.isPlaying }),
-            (target) => window.musicBar.setPlaying(target.source, target.isPlaying),
-            (target, next) => next.isPlaying === target.isPlaying,
-        )
+    const togglePlay = (on: PressedOn) =>
+        syncingRef.current
+            ? queue('play', on)
+            : debouncedToggle(
+                  'play',
+                  (current) => ({ ...current, isPlaying: !current.isPlaying }),
+                  (target) => window.musicBar.setPlaying(target.source, target.isPlaying),
+                  (target, next) => next.isPlaying === target.isPlaying,
+              )
 
     // Turning the loop off restores the previous mode, which only the page
     // knows; 'NONE' is a placeholder until the re-read lands.
     // Looping an ad makes no sense, and the repeat button belongs to the song.
-    const toggleLoop = () =>
-        !latestTrack.current?.isAd &&
-        debouncedToggle(
-            'loop',
-            (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
-            (target) => window.musicBar.setLoop(target.source, target.repeatMode === 'ONE'),
-            (target, next) => (next.repeatMode === 'ONE') === (target.repeatMode === 'ONE'),
-        )
+    const toggleLoop = (on: PressedOn) =>
+        syncingRef.current
+            ? queue('loop', on)
+            : !latestTrack.current?.isAd &&
+              debouncedToggle(
+                  'loop',
+                  (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
+                  (target) => window.musicBar.setLoop(target.source, target.repeatMode === 'ONE'),
+                  (target, next) => (next.repeatMode === 'ONE') === (target.repeatMode === 'ONE'),
+              )
 
     /** Shows a search result on the card right away, then plays it via `run`. */
     const startSong = (song: SearchSong, run: () => Promise<void>) => {
@@ -281,6 +321,7 @@ export function useNowPlaying() {
 
     /** A radio from the current song; it keeps playing, with a new queue after it. */
     const startRadio = () => {
+        if (syncingRef.current) return queue('radio', 'list')
         if (!track || track.isAd) return
         const { source } = track
         debounceAction(
@@ -344,9 +385,25 @@ export function useNowPlaying() {
         setOpeningIn(null)
     }
 
+    // The first read is in: run what was pressed while waiting, on the state
+    // it found. This render's actions already see the new track.
+    useEffect(() => {
+        if (syncing || queuedRef.current.size === 0) return
+        const actions = new Map(queuedRef.current)
+        clearQueue()
+        const play = actions.get('play')
+        const loop = actions.get('loop')
+        if (play) togglePlay(play)
+        if (loop) toggleLoop(loop)
+        if (actions.has('radio')) startRadio()
+        // Runs once per completed sync; the actions are this render's.
+    }, [syncing])
+
     return {
         state,
         stale,
+        syncing,
+        queued,
         browsers: browsers ?? [],
         needsTab,
         openable,
@@ -378,6 +435,7 @@ export function NowPlaying({
     needsTab,
     openable,
     openingIn,
+    queued,
 }: ReturnType<typeof useNowPlaying> & { artwork: ArtworkState }) {
     const showShortcuts = useCommandHeld()
     if (state?.status !== 'track') {
@@ -434,9 +492,10 @@ export function NowPlaying({
                                 ? 'Not available during ads'
                                 : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`
                         }
-                        onClick={toggleLoop}
+                        onClick={() => toggleLoop('card')}
                         active={track.repeatMode !== 'NONE'}
                         disabled={track.isAd}
+                        waiting={queued.get('loop') === 'card'}
                         shortcut={showShortcuts && !track.isAd ? '⌘O' : undefined}
                     >
                         <RepeatIcon mode={track.repeatMode} />
@@ -456,8 +515,8 @@ export function NowPlaying({
                         title={track.isPlaying ? 'Pause' : 'Play'}
                         tabIndex={-1}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={togglePlay}
-                        className="glass flex size-12 items-center justify-center rounded-full text-white transition hover:scale-105 active:scale-95"
+                        onClick={() => togglePlay('card')}
+                        className={`glass flex size-12 items-center justify-center rounded-full text-white transition hover:scale-105 active:scale-95 ${queued.get('play') === 'card' ? WAITING : ''}`}
                     >
                         {track.isPlaying ? (
                             <Pause className="size-5" fill="currentColor" strokeWidth={0} />
@@ -552,6 +611,7 @@ function IconButton({
     pressed,
     disabled,
     shortcut,
+    waiting,
     children,
 }: {
     label: string
@@ -560,6 +620,8 @@ function IconButton({
     /** Shows the button as pressed, for a keyboard shortcut that triggers it. */
     pressed?: boolean
     disabled?: boolean
+    /** Pressed before the launcher's state caught up; runs once it does. */
+    waiting?: boolean
     /** A key cap shown above the button (while ⌘ is held). */
     shortcut?: string
     children: ReactNode
@@ -584,7 +646,7 @@ function IconButton({
                 // Active is white rather than red: the header takes the artwork's
                 // color, and red on a red cover disappears.
                 disabled={disabled}
-                className={`flex size-9 items-center justify-center rounded-full transition duration-100 ${disabled ? 'cursor-default text-subdued opacity-40' : `hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}`}
+                className={`flex size-9 items-center justify-center rounded-full transition duration-100 ${disabled ? 'cursor-default text-subdued opacity-40' : `hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`} ${waiting ? WAITING : ''}`}
             >
                 {children}
             </button>
