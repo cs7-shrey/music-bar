@@ -24,6 +24,9 @@ const STALE_DIM_DELAY_MS = 300
 const TOGGLE_DEBOUNCE_MS = 300
 // How long a skip button shows as pressed, so ⌘H/⌘L look like a click.
 const PRESS_FLASH_MS = 160
+// How long ⌘ is held alone before the player buttons show their shortcuts.
+// Long enough that a quick ⌘H doesn't flash them.
+const SHORTCUT_HINT_DELAY_MS = 400
 
 type Toggle = 'play' | 'loop'
 
@@ -376,6 +379,7 @@ export function NowPlaying({
     openable,
     openingIn,
 }: ReturnType<typeof useNowPlaying> & { artwork: ArtworkState }) {
+    const showShortcuts = useCommandHeld()
     if (state?.status !== 'track') {
         const [title, detail] =
             state?.status === 'error'
@@ -433,10 +437,17 @@ export function NowPlaying({
                         onClick={toggleLoop}
                         active={track.repeatMode !== 'NONE'}
                         disabled={track.isAd}
+                        shortcut={showShortcuts && !track.isAd ? '⌘O' : undefined}
                     >
                         <RepeatIcon mode={track.repeatMode} />
                     </IconButton>
-                    <IconButton label="Previous (⌘H)" onClick={() => control('previous')} pressed={pressed === 'previous'} active>
+                    <IconButton
+                        label="Previous (⌘H)"
+                        onClick={() => control('previous')}
+                        pressed={pressed === 'previous'}
+                        active
+                        shortcut={showShortcuts ? '⌘H' : undefined}
+                    >
                         <SkipIcon direction="previous" />
                     </IconButton>
                     <button
@@ -454,7 +465,13 @@ export function NowPlaying({
                             <Play className="ml-0.5 size-5" fill="currentColor" strokeWidth={0} />
                         )}
                     </button>
-                    <IconButton label="Next (⌘L)" onClick={() => control('next')} pressed={pressed === 'next'} active>
+                    <IconButton
+                        label="Next (⌘L)"
+                        onClick={() => control('next')}
+                        pressed={pressed === 'next'}
+                        active
+                        shortcut={showShortcuts ? '⌘L' : undefined}
+                    >
                         <SkipIcon direction="next" />
                     </IconButton>
                 </div>
@@ -534,6 +551,7 @@ function IconButton({
     active,
     pressed,
     disabled,
+    shortcut,
     children,
 }: {
     label: string
@@ -542,25 +560,79 @@ function IconButton({
     /** Shows the button as pressed, for a keyboard shortcut that triggers it. */
     pressed?: boolean
     disabled?: boolean
+    /** A key cap shown above the button (while ⌘ is held). */
+    shortcut?: string
     children: ReactNode
 }) {
     return (
-        <button
-            type="button"
-            aria-label={label}
-            title={label}
-            tabIndex={-1}
-            // Keep focus in the search input.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={onClick}
-            // Active is white rather than red: the header takes the artwork's
-            // color, and red on a red cover disappears.
-            disabled={disabled}
-            className={`flex size-9 items-center justify-center rounded-full transition duration-100 ${disabled ? 'cursor-default text-subdued opacity-40' : `hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}`}
-        >
-            {children}
-        </button>
+        <span className="relative flex">
+            {/* Above, not below: below is the progress bar. */}
+            <kbd
+                aria-hidden="true"
+                className={`pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 rounded-md bg-white/20 px-1.5 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap text-white ring-1 ring-white/10 backdrop-blur-md transition duration-150 ${shortcut ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
+            >
+                {shortcut}
+            </kbd>
+            <button
+                type="button"
+                aria-label={label}
+                title={label}
+                tabIndex={-1}
+                // Keep focus in the search input.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onClick}
+                // Active is white rather than red: the header takes the artwork's
+                // color, and red on a red cover disappears.
+                disabled={disabled}
+                className={`flex size-9 items-center justify-center rounded-full transition duration-100 ${disabled ? 'cursor-default text-subdued opacity-40' : `hover:bg-white/10 active:scale-90 ${pressed ? 'scale-90 bg-white/10 text-white' : active ? 'text-white' : 'text-subdued hover:text-white'}`}`}
+            >
+                {children}
+            </button>
+        </span>
     )
+}
+
+/**
+ * Whether ⌘ is held on its own, as macOS menus and Raycast use it: the player
+ * buttons then show their shortcuts (⌘H previous, ⌘L next, ⌘O loop), which
+ * nothing else on screen teaches.
+ */
+function useCommandHeld(): boolean {
+    const [held, setHeld] = useState(false)
+    useEffect(() => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const cancel = () => {
+            clearTimeout(timer)
+            timer = undefined
+        }
+        const release = () => {
+            cancel()
+            setHeld(false)
+        }
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Meta') {
+                if (timer === undefined) timer = setTimeout(() => setHeld(true), SHORTCUT_HINT_DELAY_MS)
+            } else if (event.metaKey) {
+                // A shortcut before the delay: no hints. Once they show, they
+                // stay while ⌘ is down, so several skips in a row keep them.
+                cancel()
+            } else release()
+        }
+        const onKeyUp = (event: KeyboardEvent) => {
+            if (event.key === 'Meta') release()
+        }
+        window.addEventListener('keydown', onKeyDown)
+        window.addEventListener('keyup', onKeyUp)
+        // The launcher hides on blur, often with ⌘ still down (⌘Tab).
+        window.addEventListener('blur', release)
+        return () => {
+            cancel()
+            window.removeEventListener('keydown', onKeyDown)
+            window.removeEventListener('keyup', onKeyUp)
+            window.removeEventListener('blur', release)
+        }
+    }, [])
+    return held
 }
 
 /** YouTube's skip icons: Material Design's skip_previous / skip_next, solid with sharp corners. */
