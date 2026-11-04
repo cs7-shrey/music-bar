@@ -246,6 +246,7 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string
             { label: 'Next', keys: ['⌘', 'L'] },
             { label: 'Loop', keys: ['⌘', 'O'] },
             { label: 'Start radio', keys: ['⌘', 'R'] },
+            { label: 'Go to the playing tab', keys: ['⌘', '⇧', 'O'] },
         ],
     },
     {

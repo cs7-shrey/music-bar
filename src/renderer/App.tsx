@@ -147,6 +147,12 @@ export default function App() {
             void queueNext(selectedSong)
             return
         }
+        // ⌘⇧O goes to the tab playing the song, like clicking the cover.
+        if (event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'o') {
+            event.preventDefault()
+            if (!event.repeat) nowPlaying.goToTab()
+            return
+        }
         // Player shortcuts work from anywhere, even mid-search: ⌘O loop,
         // ⌘R radio, ⌘H previous, ⌘L next.
         const shortcut = event.metaKey && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]

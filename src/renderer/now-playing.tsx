@@ -28,13 +28,16 @@ const PRESS_FLASH_MS = 160
 // arc spins around it, so the press visibly registered. For round buttons.
 export const WAITING =
     "relative after:pointer-events-none after:absolute after:-inset-[3px] after:animate-spin after:rounded-full after:border-2 after:border-transparent after:border-t-white/60 after:content-['']"
+// The key caps shown while ⌘ is held (useCommandHeld).
+const KEY_HINT =
+    'pointer-events-none absolute left-1/2 -translate-x-1/2 rounded-md bg-white/20 px-1.5 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap text-white ring-1 ring-white/10 backdrop-blur-md transition duration-150'
 // How long ⌘ is held alone before the player buttons show their shortcuts.
 // Long enough that a quick ⌘H doesn't flash them.
 const SHORTCUT_HINT_DELAY_MS = 400
 
 type Toggle = 'play' | 'loop'
 /** An action pressed before the launcher's first read came back. */
-export type QueuedAction = 'play' | 'loop' | 'radio'
+export type QueuedAction = 'play' | 'loop' | 'radio' | 'tab'
 /**
  * Where an action was pressed, so a queued one shows on that button: the
  * card's controls, or the command list (a row, ↵ or a shortcut).
@@ -348,6 +351,37 @@ export function useNowPlaying() {
         if (source) void window.musicBar.showTab(source)
     }
 
+    /**
+     * Takes the user to the tab playing the song (cover click, ⌘⇧O). Pressed
+     * while syncing, it waits, so it goes to the tab the fresh read found.
+     */
+    const goToTab = () => {
+        // Shown pressed, so ⌘⇧O looks like a click on the cover.
+        setCoverPressed(true)
+        clearTimeout(coverPressTimer.current)
+        coverPressTimer.current = setTimeout(() => setCoverPressed(false), PRESS_FLASH_MS)
+        if (syncingRef.current) queue('tab', 'card')
+        else void openPlayingTab()
+    }
+
+    // Presses while the browser is still switching to the tab are ignored,
+    // so mashing ⌘⇧O switches once.
+    const openingTab = useRef(false)
+    const openPlayingTab = async () => {
+        const source = state?.status === 'track' ? state.track.source : null
+        if (!source || openingTab.current) return
+        openingTab.current = true
+        try {
+            await window.musicBar.showTab(source)
+        } catch (error) {
+            console.error('[music-bar] go to tab failed', error)
+        } finally {
+            openingTab.current = false
+        }
+    }
+    const [coverPressed, setCoverPressed] = useState(false)
+    const coverPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
     const loadTab = async () => {
         if (state?.status !== 'unloaded' || loadingTab) return
         const { source } = state
@@ -396,6 +430,7 @@ export function useNowPlaying() {
         if (play) togglePlay(play)
         if (loop) toggleLoop(loop)
         if (actions.has('radio')) startRadio()
+        if (actions.has('tab')) void openPlayingTab()
         // Runs once per completed sync; the actions are this render's.
     }, [syncing])
 
@@ -418,6 +453,8 @@ export function useNowPlaying() {
         startRadioFrom,
         loadTab,
         showTab,
+        goToTab,
+        coverPressed,
         loadingTab,
     }
 }
@@ -436,6 +473,9 @@ export function NowPlaying({
     openable,
     openingIn,
     queued,
+    syncing,
+    goToTab,
+    coverPressed,
 }: ReturnType<typeof useNowPlaying> & { artwork: ArtworkState }) {
     const showShortcuts = useCommandHeld()
     if (state?.status !== 'track') {
@@ -473,6 +513,11 @@ export function NowPlaying({
         <Hero
             stale={stale}
             artwork={artwork}
+            // Clickable once synced, so it never opens a tab from stale state.
+            onArtworkClick={syncing ? undefined : goToTab}
+            artworkWaiting={queued.has('tab')}
+            artworkPressed={coverPressed}
+            artworkShortcut={showShortcuts ? '⌘⇧O' : undefined}
             eyebrow={
                 track.playBlocked
                     ? `${BROWSER_NAMES[track.source.browser]} blocked playback`
@@ -565,9 +610,20 @@ function Hero({
     stale,
     controls,
     footer,
+    onArtworkClick,
+    artworkWaiting,
+    artworkPressed,
+    artworkShortcut,
     children,
 }: {
     artwork: ArtworkState
+    /** Makes the cover a button. */
+    onArtworkClick?: () => void
+    /** The cover's action was pressed while syncing and runs once it's done. */
+    artworkWaiting?: boolean
+    /** Shows the cover as pressed, for the shortcut that triggers it. */
+    artworkPressed?: boolean
+    artworkShortcut?: string
     eyebrow: string
     /** Dims the block while it shows state from before the launcher opened. */
     stale: boolean
@@ -578,7 +634,13 @@ function Hero({
     return (
         <section className={`flex flex-col gap-3 px-5 pt-4 pb-4 transition-opacity duration-150 ${stale ? 'opacity-50' : ''}`}>
             <div className="flex items-end gap-4">
-                <Artwork artwork={artwork} />
+                <Artwork
+                    artwork={artwork}
+                    onClick={onArtworkClick}
+                    waiting={artworkWaiting}
+                    pressed={artworkPressed}
+                    shortcut={artworkShortcut}
+                />
                 <div className="flex min-w-0 flex-1 flex-col gap-1 pb-1">
                     <span className="text-xs font-bold text-white/80">{eyebrow}</span>
                     {children}
@@ -590,10 +652,57 @@ function Hero({
     )
 }
 
-function Artwork({ artwork }: { artwork: ArtworkState }) {
+function Artwork({
+    artwork,
+    onClick,
+    waiting,
+    pressed,
+    shortcut,
+}: {
+    artwork: ArtworkState
+    onClick?: () => void
+    waiting?: boolean
+    pressed?: boolean
+    shortcut?: string
+}) {
+    return (
+        // Pressed shrinks the whole cover, so it works before it's clickable too.
+        <div className={`relative shrink-0 transition duration-100 ${pressed ? 'scale-[0.97] brightness-90' : ''}`}>
+            {onClick ? (
+                <button
+                    type="button"
+                    aria-label="Go to the tab playing this (⌘⇧O)"
+                    title="Go to the tab playing this (⌘⇧O)"
+                    tabIndex={-1}
+                    // Keep focus in the search input.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onClick}
+                    className="block cursor-pointer rounded-md transition duration-100 hover:brightness-110 active:scale-[0.97]"
+                >
+                    <Cover artwork={artwork} />
+                </button>
+            ) : (
+                <Cover artwork={artwork} />
+            )}
+            {waiting && (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/40">
+                    <span className="size-7 animate-spin rounded-full border-2 border-white/15 border-t-white/60" />
+                </span>
+            )}
+            <kbd
+                aria-hidden="true"
+                className={`${KEY_HINT} bottom-1.5 ${shortcut ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
+            >
+                {shortcut}
+            </kbd>
+        </div>
+    )
+}
+
+function Cover({ artwork }: { artwork: ArtworkState }) {
     const frame = 'size-[92px] shrink-0 rounded-md shadow-[0_8px_28px_rgba(0,0,0,0.55)]'
     if (artwork.src) {
-        return <img src={artwork.src} alt="" className={`${frame} object-cover`} />
+        return <img src={artwork.src} alt="" className={`${frame} object-cover`} draggable={false} />
     }
     // A plain tile while the art loads; the note only when there's none to show.
     if (artwork.status === 'loading') return <div className={`${frame} bg-highlight`} />
@@ -631,7 +740,7 @@ function IconButton({
             {/* Above, not below: below is the progress bar. */}
             <kbd
                 aria-hidden="true"
-                className={`pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 rounded-md bg-white/20 px-1.5 py-0.5 font-sans text-[11px] font-bold whitespace-nowrap text-white ring-1 ring-white/10 backdrop-blur-md transition duration-150 ${shortcut ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
+                className={`${KEY_HINT} bottom-full mb-1.5 ${shortcut ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'}`}
             >
                 {shortcut}
             </kbd>
@@ -656,7 +765,8 @@ function IconButton({
 
 /**
  * Whether ⌘ is held on its own, as macOS menus and Raycast use it: the player
- * buttons then show their shortcuts (⌘H previous, ⌘L next, ⌘O loop), which
+ * buttons then show their shortcuts (⌘H previous, ⌘L next, ⌘O loop, ⌘⇧O
+ * go to the tab), which
  * nothing else on screen teaches.
  */
 function useCommandHeld(): boolean {
