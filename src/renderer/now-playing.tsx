@@ -307,6 +307,10 @@ export function useNowPlaying() {
                 artworkUrl: song.thumbnailUrl,
                 isPlaying: true,
                 isAd: false,
+                // Unknown until the page reports the new song; the bar waits at zero.
+                position: 0,
+                duration: null,
+                readAt: Date.now(),
             }),
             run,
             (next) => !before || !sameSong(next, before),
@@ -871,21 +875,23 @@ function Progress({ track }: { track: Track }) {
     const anchor = useRef<{ position: number; at: number; song: string } | null>(null)
 
     const song = `${track.title}\u0000${track.artist}`
+    // No length yet means the song is still loading (or was just picked from
+    // search): hold at the reported position instead of running ahead.
+    const playing = track.isPlaying && track.duration !== null
     const now = Date.now()
-    const reported = track.position + (track.isPlaying ? Math.max(0, (now - track.readAt) / 1000) : 0)
+    const reported = track.position + (playing ? Math.max(0, (now - track.readAt) / 1000) : 0)
     const current = anchor.current
     const predicted = current ? current.position + (now - current.at) / 1000 : 0
     if (
         !current ||
         current.song !== song ||
-        !track.isPlaying ||
+        !playing ||
         Math.abs(reported - predicted) > PROGRESS_DRIFT_TOLERANCE_S
     ) {
         anchor.current = { position: reported, at: now, song }
     }
 
     const duration = track.duration
-    const playing = track.isPlaying
 
     useEffect(() => {
         let frame = 0

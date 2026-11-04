@@ -200,6 +200,12 @@ const TAB_ANSWER_SECONDS = 1
 const INACTIVE_RETRY_MS = 30_000
 const inactiveUntil = new Map<string, number>()
 const tabKey = (source: TrackSource) => `${source.browser}:${source.windowId}:${source.tabId}`
+// A tab that answered this recently and then times out is busy (loading a
+// new song can block its page for over a second), not unloaded: browsers
+// don't unload a tab that was just playing or being controlled.
+const BUSY_GRACE_MS = 60_000
+const lastAnswered = new Map<string, number>()
+const recentlyAnswered = (source: TrackSource) => Date.now() - (lastAnswered.get(tabKey(source)) ?? 0) < BUSY_GRACE_MS
 
 // The tab Music Bar follows: the last one seen playing or controlled. Without
 // this, a pause or the gap between songs hands the card to whichever other
@@ -300,10 +306,14 @@ return out`
             const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
             if (kind === 'skipped') return { source, track: null, loaded: false }
             if (kind === 'unloaded') {
+                // Busy: counts as loaded with nothing read, so the card keeps
+                // the followed tab's last track.
+                if (recentlyAnswered(source)) return { source, track: null, loaded: true }
                 inactiveUntil.set(tabKey(source), Date.now() + INACTIVE_RETRY_MS)
                 return { source, track: null, loaded: false }
             }
             inactiveUntil.delete(tabKey(source))
+            lastAnswered.set(tabKey(source), Date.now())
             if (!json) return { source, track: null, loaded: true }
             const track: Track = { ...JSON.parse(json), source }
             return { source, track, loaded: true }
@@ -462,12 +472,14 @@ async function executeInTab(source: TrackSource, js: string, timeoutSeconds = 3)
     if (!BROWSERS.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
         throw new Error('Invalid tab')
     }
-    return runAppleScript(`
+    const result = await runAppleScript(`
 with timeout of ${timeoutSeconds} seconds
     tell ${appRef(source.browser)}
         execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
     end tell
 end timeout`)
+    lastAnswered.set(tabKey(source), Date.now())
+    return result
 }
 
 const ASYNC_POLL_MS = 80
