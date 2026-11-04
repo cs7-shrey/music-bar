@@ -164,4 +164,7 @@ Also:
   state from the last open. Actions that depend on it (play/pause, loop,
   radio, going to the tab) are queued instead (`queue`): the button stays pressed, a second
   press does nothing, and the action runs on the fresh state. So ↵ on
-  "Pause" right after a media key started playback pauses.
+  "Pause" right after a media key started playback pauses. Play/pause also
+  waits while a song loads (`isLoading`, shown as "Fetching…"): the page
+  reports a loading song as neither playing nor paused, and a tab too busy
+  to answer gives back its last read marked the same way.

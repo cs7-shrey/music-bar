@@ -11,6 +11,9 @@ import type {
 } from '../shared/ipc'
 
 const POLL_MS = 2000
+// While a song loads, reads come this often, so "Fetching…" ends soon after
+// the song starts instead of up to a full poll later.
+const LOADING_POLL_MS = 400
 // After an action, the acted-on tab is re-read this often until the change
 // shows (or the timeout passes), instead of waiting for the next poll.
 const SETTLE_POLL_MS = 250
@@ -113,14 +116,16 @@ export function useNowPlaying() {
         let dimTimer: ReturnType<typeof setTimeout> | undefined
 
         const poll = async (current: number) => {
+            let loading = false
             try {
                 const next = await read(window.musicBar.getNowPlaying)
                 if (current === generation && next) accept(next)
+                loading = next?.status === 'track' && next.track.isLoading
             } catch (error) {
                 // A failed read must not end the loop, or the card freezes until the launcher reopens.
                 console.error('[music-bar] now-playing read failed', error)
             }
-            if (current === generation) timer = setTimeout(() => void poll(current), POLL_MS)
+            if (current === generation) timer = setTimeout(() => void poll(current), loading ? LOADING_POLL_MS : POLL_MS)
         }
         const stop = () => {
             generation++
@@ -238,6 +243,9 @@ export function useNowPlaying() {
     }
 
     const track = state?.status === 'track' ? state.track : null
+    // Play/pause pressed while a song loads waits like it does while syncing:
+    // the page can't yet say which way to flip.
+    const loading = !!track?.isLoading
     latestTrack.current = track
 
     const pendingActions = useRef<Partial<Record<string, ReturnType<typeof setTimeout>>>>({})
@@ -267,12 +275,12 @@ export function useNowPlaying() {
         void act(
             (current) => current,
             () => window.musicBar.control(before.source, action),
-            (next) => !sameSong(next, before),
+            (next) => !sameSong(next, before) && !next.isLoading,
         )
     }
 
     const togglePlay = (on: PressedOn) =>
-        syncingRef.current
+        syncingRef.current || latestTrack.current?.isLoading
             ? queue('play', on)
             : debouncedToggle(
                   'play',
@@ -305,7 +313,8 @@ export function useNowPlaying() {
                 artist: song.artist,
                 album: '',
                 artworkUrl: song.thumbnailUrl,
-                isPlaying: true,
+                isPlaying: false,
+                isLoading: true,
                 isAd: false,
                 // Unknown until the page reports the new song; the bar waits at zero.
                 position: 0,
@@ -313,7 +322,8 @@ export function useNowPlaying() {
                 readAt: Date.now(),
             }),
             run,
-            (next) => !before || !sameSong(next, before),
+            // Done once the new song plays (or is known paused), not while it loads.
+            (next) => (!before || !sameSong(next, before)) && !next.isLoading,
         )
     }
 
@@ -426,7 +436,7 @@ export function useNowPlaying() {
     // The first read is in: run what was pressed while waiting, on the state
     // it found. This render's actions already see the new track.
     useEffect(() => {
-        if (syncing || queuedRef.current.size === 0) return
+        if (syncing || loading || queuedRef.current.size === 0) return
         const actions = new Map(queuedRef.current)
         clearQueue()
         const play = actions.get('play')
@@ -436,7 +446,7 @@ export function useNowPlaying() {
         if (actions.has('radio')) startRadio()
         if (actions.has('tab')) void openPlayingTab()
         // Runs once per completed sync; the actions are this render's.
-    }, [syncing])
+    }, [syncing, loading])
 
     return {
         state,
@@ -525,13 +535,15 @@ export function NowPlaying({
             eyebrow={
                 track.playBlocked
                     ? `${BROWSER_NAMES[track.source.browser]} blocked playback`
-                    : track.isAd
-                      ? track.isPlaying
-                          ? 'Ad playing'
-                          : 'Ad paused'
-                      : track.isPlaying
-                        ? 'Now playing'
-                        : 'Paused'
+                    : track.isLoading
+                      ? 'Fetching…'
+                      : track.isAd
+                        ? track.isPlaying
+                            ? 'Ad playing'
+                            : 'Ad paused'
+                        : track.isPlaying
+                          ? 'Now playing'
+                          : 'Paused'
             }
             controls={
                 <div className="flex items-center gap-1.5">
@@ -560,14 +572,14 @@ export function NowPlaying({
                     </IconButton>
                     <button
                         type="button"
-                        aria-label={track.isPlaying ? 'Pause' : 'Play'}
-                        title={track.isPlaying ? 'Pause' : 'Play'}
+                        aria-label={track.isPlaying || track.isLoading ? 'Pause' : 'Play'}
+                        title={track.isPlaying || track.isLoading ? 'Pause' : 'Play'}
                         tabIndex={-1}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => togglePlay('card')}
                         className={`glass flex size-12 items-center justify-center rounded-full text-white transition hover:scale-105 active:scale-95 ${queued.get('play') === 'card' ? WAITING : ''}`}
                     >
-                        {track.isPlaying ? (
+                        {track.isPlaying || track.isLoading ? (
                             <Pause className="size-5" fill="currentColor" strokeWidth={0} />
                         ) : (
                             <Play className="ml-0.5 size-5" fill="currentColor" strokeWidth={0} />
@@ -877,7 +889,7 @@ function Progress({ track }: { track: Track }) {
     const song = `${track.title}\u0000${track.artist}`
     // No length yet means the song is still loading (or was just picked from
     // search): hold at the reported position instead of running ahead.
-    const playing = track.isPlaying && track.duration !== null
+    const playing = track.isPlaying && !track.isLoading && track.duration !== null
     const now = Date.now()
     const reported = track.position + (playing ? Math.max(0, (now - track.readAt) / 1000) : 0)
     const current = anchor.current

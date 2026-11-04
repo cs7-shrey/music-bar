@@ -222,13 +222,13 @@ export default function App() {
                 // Stable value so the selection does not jump when the title flips.
                 value={PLAY_PAUSE_COMMAND}
                 icon={
-                    track?.isPlaying ? (
+                    track?.isPlaying || track?.isLoading ? (
                         <Pause fill="currentColor" strokeWidth={0} />
                     ) : (
                         <Play fill="currentColor" strokeWidth={0} />
                     )
                 }
-                title={track?.isPlaying ? 'Pause' : 'Play'}
+                title={track?.isPlaying || track?.isLoading ? 'Pause' : 'Play'}
                 subtitle={
                     !track
                         ? 'Nothing is playing'

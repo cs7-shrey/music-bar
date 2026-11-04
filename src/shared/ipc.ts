@@ -89,6 +89,11 @@ export interface Track {
     album: string
     artworkUrl: string | null
     isPlaying: boolean
+    /**
+     * Playing or paused isn't known yet: the song is still loading, or the
+     * tab was too busy to answer and this is its last read.
+     */
+    isLoading: boolean
     repeatMode: RepeatMode
     /** Chromium hasn't loaded media in this tab yet; playing wakes it first. */
     isAsleep: boolean

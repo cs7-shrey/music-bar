@@ -95,6 +95,7 @@ const READ_TRACK_JS = `(() => {
         album: m.album,
         artworkUrl: art ? art.src : null,
         isPlaying: !!video && !video.paused && !video.ended && video.readyState >= 2,
+        isLoading: !!video && !video.paused && !video.ended && video.readyState < 2,
         repeatMode: document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode') || 'NONE',
         isAsleep: ${IS_ASLEEP_JS},
         position: Number(slider?.getAttribute('aria-valuenow')) || 0,
@@ -173,7 +174,7 @@ function runAppleScript(script: string, timeoutMs = 10_000): Promise<string> {
  * memory): its scripts never answer, and Brave's tab info doesn't say so.
  */
 type TabResult =
-    | { source: TrackSource; track: Track | null; loaded: boolean }
+    | { source: TrackSource; track: Track | null; loaded: boolean; busy?: boolean }
     | { error: string; code: number | null }
 
 /**
@@ -308,7 +309,7 @@ return out`
             if (kind === 'unloaded') {
                 // Busy: counts as loaded with nothing read, so the card keeps
                 // the followed tab's last track.
-                if (recentlyAnswered(source)) return { source, track: null, loaded: true }
+                if (recentlyAnswered(source)) return { source, track: null, loaded: true, busy: true }
                 inactiveUntil.set(tabKey(source), Date.now() + INACTIVE_RETRY_MS)
                 return { source, track: null, loaded: false }
             }
@@ -423,7 +424,8 @@ function chooseNowPlaying(results: TabResult[]): NowPlaying {
     if (followedTab && !followedTab.loaded) return { status: 'unloaded', source: followedTab.source }
     if (followedTab) {
         const track = followedTab.track ? follow(followedTab.track) : followedTrack
-        if (track) return { status: 'track', track }
+        // A busy tab's last read may be out of date, so its state is unknown.
+        if (track) return { status: 'track', track: followedTab.busy ? { ...track, isLoading: true } : track }
     }
 
     if (tracks[0]) return { status: 'track', track: tracks[0] }
