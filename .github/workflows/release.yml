@@ -40,7 +40,46 @@ jobs:
 
             - run: pnpm typecheck
 
+            # A keychain of its own for the Developer ID certificate, so
+            # codesign can use it without a password prompt.
+            - name: Import the signing certificate
+              env:
+                  MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+                  MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+              run: |
+                  keychain="$RUNNER_TEMP/signing.keychain-db"
+                  keychain_password=$(openssl rand -base64 24)
+                  security create-keychain -p "$keychain_password" "$keychain"
+                  security set-keychain-settings -lut 21600 "$keychain"
+                  security unlock-keychain -p "$keychain_password" "$keychain"
+                  echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+                  security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+                  rm "$RUNNER_TEMP/cert.p12"
+                  security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+                  security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+            - name: Write the notarization key
+              env:
+                  APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+              run: |
+                  echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+                  echo "APPLE_API_KEY=$RUNNER_TEMP/notary.p8" >> "$GITHUB_ENV"
+
+            # Signs with the certificate above and notarizes the app and DMG
+            # (forge.config.ts); fails rather than ship an unsigned release.
             - run: pnpm make
+              env:
+                  MUSIC_BAR_REQUIRE_NOTARIZATION: '1'
+                  APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+                  APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+            - name: Check Gatekeeper accepts the download
+              run: |
+                  version=${GITHUB_REF_NAME#v}
+                  dmg="out/make/Music Bar-$version-arm64.dmg"
+                  xcrun stapler validate "$dmg"
+                  spctl --assess --type open --context context:primary-signature -vv "$dmg"
+                  spctl --assess --type execute -vv "out/Music Bar-darwin-arm64/Music Bar.app"
 
             - name: Publish the release
               env:

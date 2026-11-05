@@ -135,10 +135,26 @@ up-to-date `main` bumps `version` in `package.json`, commits
 the DMG (`pnpm make`) and publishes a GitHub release with it attached as
 `Music-Bar-X.Y.Z-arm64.dmg`. The notes come from `scripts/release-notes.mjs`:
 the `feat`, `fix` and `perf` commit summaries since the previous tag, so
-write those summaries for users. They end with install steps, including
-Open Anyway, needed while the app isn't signed. Edit a release's notes on
-GitHub afterwards if needed. Never move or reuse a published tag; release
-a new patch instead.
+write those summaries for users. They end with install steps. Edit a
+release's notes on GitHub afterwards if needed. Never move or reuse a
+published tag; release a new patch instead.
+
+Releases are signed with a Developer ID certificate and notarized
+(`osxSign`, `osxNotarize` and the `postMake` hook in `forge.config.ts`), so
+they open without Gatekeeper warnings. The app runs with the hardened
+runtime; its entitlements are in `entitlements.plist` (JIT for V8, Apple
+Events for AppleScript). Add one there for anything else the hardened
+runtime blocks. The workflow reads these repository secrets:
+`MACOS_CERT_P12` (the certificate and key as a base64 `.p12`),
+`MACOS_CERT_PASSWORD`, and the App Store Connect API key for notarization:
+`APPLE_API_KEY_P8` (the `.p8` file's text), `APPLE_API_KEY_ID`,
+`APPLE_API_ISSUER`. It fails rather than publish an unnotarized build
+(`MUSIC_BAR_REQUIRE_NOTARIZATION`). `pnpm make` on a Mac with the
+certificate in its keychain signs too; it notarizes when `APPLE_API_KEY`
+(a path to the `.p8`), `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are set.
+Without the certificate it signs ad-hoc, which runs locally but needs Open
+Anyway when downloaded. A new signature changes the app's identity for
+macOS permissions, so the first signed release asks for Automation again.
 
 ## Player actions: debouncing and ordering
 

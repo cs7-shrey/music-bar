@@ -46,9 +46,8 @@ sections.push(`## Install
 
 1. Download the \`.dmg\` below and open it.
 2. Drag **Music Bar** onto **Applications**.
-3. Open Music Bar from Applications. macOS will say it can't verify the app, because it isn't signed with an Apple Developer ID yet. Click **Done**.
-4. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Music Bar. Confirm, and it opens.
+3. Open Music Bar from Applications.
 
-You only do steps 3–4 once. Needs a Mac with Apple silicon.`)
+Needs a Mac with Apple silicon.`)
 
 console.log(sections.join('\n\n'))

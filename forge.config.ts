@@ -5,6 +5,37 @@ import type { ForgeConfig } from '@electron-forge/shared-types'
 import { VitePlugin } from '@electron-forge/plugin-vite'
 import { MakerDMG } from '@electron-forge/maker-dmg'
 import { MakerZIP } from '@electron-forge/maker-zip'
+import { notarize } from '@electron/notarize'
+
+// Signing: Developer ID, whenever the certificate is in a keychain (yours,
+// or the one the release workflow imports it into). Otherwise ad-hoc, which
+// runs locally but makes downloads need Open Anyway.
+const SIGNING_IDENTITY = 'Developer ID Application: Shrey Singh (VF8SH989TV)'
+const canSign = (() => {
+    try {
+        return execFileSync('security', ['find-identity', '-v', '-p', 'codesigning']).toString().includes(SIGNING_IDENTITY)
+    } catch {
+        return false
+    }
+})()
+
+// Notarization: Apple scans the signed app and DMG so Gatekeeper opens them
+// without a warning. Needs an App Store Connect API key: APPLE_API_KEY (path
+// to the .p8), APPLE_API_KEY_ID and APPLE_API_ISSUER.
+const { APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER } = process.env
+const notarizeWith =
+    canSign && APPLE_API_KEY && APPLE_API_KEY_ID && APPLE_API_ISSUER
+        ? { appleApiKey: APPLE_API_KEY, appleApiKeyId: APPLE_API_KEY_ID, appleApiIssuer: APPLE_API_ISSUER }
+        : undefined
+
+// The release workflow sets this, so a release can't ship unsigned by accident.
+if (process.env.MUSIC_BAR_REQUIRE_NOTARIZATION && !notarizeWith) {
+    throw new Error(
+        canSign
+            ? 'Notarization needs APPLE_API_KEY, APPLE_API_KEY_ID and APPLE_API_ISSUER.'
+            : `No "${SIGNING_IDENTITY}" certificate in the keychain.`,
+    )
+}
 
 const config: ForgeConfig = {
     packagerConfig: {
@@ -21,6 +52,18 @@ const config: ForgeConfig = {
             NSAppleEventsUsageDescription:
                 'Music Bar controls YouTube Music in your browser to show and change what is playing.',
         },
+        // Hardened runtime on every binary (osx-sign's default), koffi's
+        // included. The app itself gets entitlements.plist; helpers keep
+        // osx-sign's per-helper defaults.
+        osxSign: canSign
+            ? {
+                  identity: SIGNING_IDENTITY,
+                  optionsForFile: (filePath) =>
+                      filePath.endsWith('Music Bar.app') ? { entitlements: 'entitlements.plist' } : {},
+              }
+            : undefined,
+        // Notarizes the app and staples the ticket to it, so it opens offline too.
+        osxNotarize: notarizeWith,
     },
     makers: [
         // What users download: opens to the app beside an Applications
@@ -30,7 +73,10 @@ const config: ForgeConfig = {
             icon: 'assets/icon.icns',
             background: 'assets/dmg-background.png',
             iconSize: 112,
-            additionalDMGOptions: { window: { size: { width: 640, height: 400 } } },
+            additionalDMGOptions: {
+                window: { size: { width: 640, height: 400 } },
+                ...(canSign && { 'code-sign': { 'signing-identity': SIGNING_IDENTITY, identifier: 'dev.shrey.music-bar.dmg' } }),
+            },
             contents: (opts) => [
                 { type: 'file', path: opts.appPath, x: 170, y: 180 },
                 { type: 'link', path: '/Applications', x: 470, y: 180 },
@@ -54,17 +100,26 @@ const config: ForgeConfig = {
                 cpSync(join(from, file), join(to, file), { recursive: true })
             }
         },
-        // Packaging renames Electron's app and edits its Info.plist and icon,
-        // which breaks the ad-hoc signature Electron ships with. A downloaded
-        // copy then fails Gatekeeper as "damaged". Re-sign ad-hoc over the
-        // final files so it gets the "Open Anyway" prompt instead. Replace
-        // with Developer ID signing (osxSign) once there's a certificate.
+        // Without the certificate: packaging renames Electron's app and edits
+        // its Info.plist and icon, which breaks the ad-hoc signature Electron
+        // ships with. A downloaded copy then fails Gatekeeper as "damaged".
+        // Re-sign ad-hoc over the final files so it gets the "Open Anyway"
+        // prompt instead. With the certificate, osxSign has signed it already.
         postPackage: async (config, { outputPaths, platform }) => {
-            if (platform !== 'darwin') return
+            if (platform !== 'darwin' || canSign) return
             const appName = `${config.packagerConfig.name}.app`
             for (const outputPath of outputPaths) {
                 execFileSync('codesign', ['--force', '--deep', '--sign', '-', join(outputPath, appName)])
             }
+        },
+        // The DMG is notarized too (the app inside already is), and stapled,
+        // so the download opens without a check against Apple's servers.
+        postMake: async (_config, results) => {
+            if (!notarizeWith) return results
+            for (const artifact of results.flatMap((result) => result.artifacts)) {
+                if (artifact.endsWith('.dmg')) await notarize({ appPath: artifact, ...notarizeWith })
+            }
+            return results
         },
     },
     plugins: [

@@ -14,10 +14,7 @@ queue and Premium all work as they do in the browser.
    [latest release](https://github.com/cs7-shrey/music-bar/releases/latest)
    and open it.
 2. Drag **Music Bar** onto **Applications**.
-3. Open Music Bar from Applications. macOS will say it can't verify the app,
-   because it isn't signed with an Apple Developer ID yet. Click **Done**.
-4. Open **System Settings → Privacy & Security**, scroll down, and click
-   **Open Anyway** next to Music Bar. Confirm, and it opens.
+3. Open Music Bar from Applications.
 
 Needs a Mac with Apple silicon.
 
