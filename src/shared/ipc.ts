@@ -65,6 +65,8 @@ export const IPC = {
     updateGet: 'update:get',
     /** renderer → main: restart to install the downloaded update. */
     updateInstall: 'update:install',
+    /** main → renderer: an update finished downloading while the app runs. */
+    updateReady: 'update:ready',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -210,4 +212,5 @@ export interface MusicBarApi {
     /** The version downloaded and waiting for a restart, or null. */
     getUpdate(): Promise<string | null>
     installUpdate(): void
+    onUpdateReady(listener: () => void): () => void
 }

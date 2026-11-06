@@ -87,10 +87,16 @@ export default function App() {
     useEffect(() => {
         const refresh = () => void window.musicBar.getUpdate().then(setUpdate)
         refresh()
-        return window.musicBar.onShown(() => {
+        // An update can finish downloading while the launcher is open.
+        const stopReady = window.musicBar.onUpdateReady(refresh)
+        const stopShown = window.musicBar.onShown(() => {
             refresh()
             setOpens((count) => count + 1)
         })
+        return () => {
+            stopReady()
+            stopShown()
+        }
     }, [])
 
     // Land on the first song once a full search comes back.

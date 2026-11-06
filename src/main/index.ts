@@ -6,6 +6,7 @@ import {
     focusLauncher,
     hideLauncher,
     holdThroughBlur,
+    sendToLauncher,
     showLauncher,
     toggleLauncher,
 } from './launcher-window'
@@ -175,7 +176,10 @@ app.whenReady().then(() => {
     createLauncherWindow()
     createTray()
     refreshOpenAtLogin()
-    startUpdater(updateTrayMenu)
+    startUpdater(() => {
+        updateTrayMenu()
+        sendToLauncher(IPC.updateReady)
+    })
     // Opening the app shows setup the first time, then the launcher. Not the
     // launcher at login, which starts quietly in the menu bar, or in
     // `pnpm dev`, which restarts the app on every main-process change.

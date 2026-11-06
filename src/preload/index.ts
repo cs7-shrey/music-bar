@@ -42,6 +42,7 @@ const api: MusicBarApi = {
     finishSetup: () => ipcRenderer.send(IPC.setupFinish),
     getUpdate: () => ipcRenderer.invoke(IPC.updateGet),
     installUpdate: () => ipcRenderer.send(IPC.updateInstall),
+    onUpdateReady: (listener) => subscribe(IPC.updateReady, listener),
 }
 
 contextBridge.exposeInMainWorld('musicBar', api)

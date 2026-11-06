@@ -72,6 +72,11 @@ export function createLauncherWindow(): BrowserWindow {
     return window
 }
 
+/** Sends an event to the launcher's page, if the window exists. */
+export function sendToLauncher(channel: string): void {
+    window?.webContents.send(channel)
+}
+
 export function showLauncher(): void {
     if (!window) return
     if (!loaded) {
