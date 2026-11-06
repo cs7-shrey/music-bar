@@ -18,6 +18,7 @@ import { closeSetup, isSetupOpen, showSetup } from './setup-window'
 import { describe, logFile, logger } from './log'
 import { canOpenAtLogin, isOpenAtLogin, openedAtLogin, refreshOpenAtLogin, setOpenAtLogin } from './login-item'
 import { borrowSystemShortcut, returnSystemShortcuts } from './system-shortcuts'
+import { installUpdate, startUpdater, updateReady } from './updater'
 
 // macOS 27 gives ⌘⇧Space to Siri; Music Bar borrows it while running (see
 // system-shortcuts.ts). If that fails, ⌥⇧Space opens the launcher too.
@@ -115,8 +116,20 @@ function createTray(): void {
     icon.setTemplateImage(true)
     tray = new Tray(icon)
     tray.setToolTip('Music Bar')
-    tray.setContextMenu(
+    updateTrayMenu()
+}
+
+/** The menu bar menu; rebuilt when an update is ready to offer the restart. */
+function updateTrayMenu(): void {
+    const update = updateReady()
+    tray?.setContextMenu(
         Menu.buildFromTemplate([
+            ...(update
+                ? [
+                      { label: `Restart to Update to ${update}`, click: installUpdate },
+                      { type: 'separator' as const },
+                  ]
+                : []),
             { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
             { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: () => openSettings() },
             { label: 'Show Log File', click: () => shell.showItemInFolder(logFile()) },
@@ -162,6 +175,7 @@ app.whenReady().then(() => {
     createLauncherWindow()
     createTray()
     refreshOpenAtLogin()
+    startUpdater(updateTrayMenu)
     // Opening the app shows setup the first time, then the launcher. Not the
     // launcher at login, which starts quietly in the menu bar, or in
     // `pnpm dev`, which restarts the app on every main-process change.
@@ -221,6 +235,8 @@ app.whenReady().then(() => {
         updateSettings({ awaitingShortcut: true })
         log.info('setup finished', getSettings())
     })
+    ipcMain.handle(IPC.updateGet, () => updateReady())
+    ipcMain.on(IPC.updateInstall, installUpdate)
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
     ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
     ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))

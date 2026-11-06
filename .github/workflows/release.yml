@@ -89,5 +89,10 @@ jobs:
                   # No spaces: GitHub would turn them into dots in the download name.
                   dmg="Music-Bar-$version-arm64.dmg"
                   cp "out/make/Music Bar-$version-arm64.dmg" "$dmg"
+                  # For auto-update: update.electronjs.org picks the zip whose
+                  # name has -darwin and -arm64 in it. The app reads the
+                  # version from the title, so keep "Music Bar X.Y.Z".
+                  zip="Music-Bar-darwin-arm64-$version.zip"
+                  cp "out/make/zip/darwin/arm64/Music Bar-darwin-arm64-$version.zip" "$zip"
                   node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
-                  gh release create "$GITHUB_REF_NAME" "$dmg" --title "Music Bar $version" --notes-file notes.md
+                  gh release create "$GITHUB_REF_NAME" "$dmg" "$zip" --title "Music Bar $version" --notes-file notes.md

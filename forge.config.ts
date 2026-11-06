@@ -85,7 +85,7 @@ const config: ForgeConfig = {
                 { type: 'position', path: '.VolumeIcon.icns', x: 470, y: 900 },
             ],
         }),
-        // Kept for auto-update later, which installs from a zip.
+        // What auto-update downloads (src/main/updater.ts).
         new MakerZIP({}, ['darwin']),
     ],
     hooks: {

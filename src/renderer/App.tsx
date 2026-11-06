@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, Repeat1, Search } from 'lucide-react'
+import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, RefreshCw, Repeat1, Search } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
 import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying, WAITING } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
@@ -78,6 +78,20 @@ export default function App() {
             }),
         [],
     )
+
+    // A downloaded update waiting for a restart (src/main/updater.ts), asked
+    // for on every open.
+    const [update, setUpdate] = useState<string | null>(null)
+    // Counts opens, to restart the update mark's animation on each.
+    const [opens, setOpens] = useState(0)
+    useEffect(() => {
+        const refresh = () => void window.musicBar.getUpdate().then(setUpdate)
+        refresh()
+        return window.musicBar.onShown(() => {
+            refresh()
+            setOpens((count) => count + 1)
+        })
+    }, [])
 
     // Land on the first song once a full search comes back.
     const firstResult = full.results?.status === 'ok' ? full.results.songs[0] : undefined
@@ -329,6 +343,18 @@ export default function App() {
     )
     const footerProblem = problems[0]
 
+    const updateRow = update && (
+        <Command.Group heading="Music Bar">
+            <CommandRow
+                value="update:install"
+                icon={<RefreshCw strokeWidth={2.25} />}
+                title="Restart to Update"
+                subtitle={`Music Bar ${update} is ready to install`}
+                onSelect={window.musicBar.installUpdate}
+            />
+        </Command.Group>
+    )
+
     const liveResults = live.results?.status === 'ok' ? live.results : null
     const suggestions = (liveResults?.suggestions ?? []).filter((text) => text.toLowerCase() !== trimmed.toLowerCase())
 
@@ -378,6 +404,7 @@ export default function App() {
             <Command.List className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-2">
                 {!trimmed && commands}
                 {!trimmed && browserRows}
+                {!trimmed && updateRow}
 
                 {trimmed && submitted === null && (
                     <>
@@ -447,7 +474,13 @@ export default function App() {
 
             <footer className="flex h-10 shrink-0 items-center justify-between border-t border-white/[0.06] px-5 text-xs font-semibold text-subdued">
                 <span className="flex min-w-0 items-center gap-2">
-                    <img src={markUrl} alt="" className="size-5 shrink-0" draggable={false} />
+                    {/* With an update downloaded, the mark offers the restart. */}
+                    {update ? (
+                        // Remounted on each open, so the animation starts 1s after it.
+                        <UpdateMark key={opens} version={update} />
+                    ) : (
+                        <img src={markUrl} alt="" className="size-5 shrink-0" draggable={false} />
+                    )}
                     {notice ? (
                         <span className="truncate text-white">{notice}</span>
                     ) : track?.playBlocked ? (
@@ -479,6 +512,83 @@ export default function App() {
                 </span>
             </footer>
         </Command>
+    )
+}
+
+// The note from assets/mark.svg, without its tile, so it can turn on its own.
+const MARK_NOTE_PATH =
+    'M449.946 244.38C449.946 163.341 503.94 102.311 589.929 89.3052L1296.84 1.26276C1395.83 -10.743 1476.82 64.2931 1476.82 165.342C1476.82 260.388 1415.83 330.421 1323.84 343.428L656.921 427.468C594.929 435.472 559.933 474.491 559.933 535.52V1132.81C559.933 1288.88 434.948 1415.94 279.967 1415.94C124.985 1415.94 0 1288.88 0 1132.81C0 978.734 124.985 854.674 279.967 854.674C318.962 854.674 350.958 863.678 381.954 875.684C417.95 889.691 449.946 872.683 449.946 832.663V244.38Z M536.368 379.871V243.655C536.368 199.943 561.724 175.546 604.322 169.447L1279.8 84.0572C1343.7 75.9248 1384.26 107.438 1389.34 158.265C1395.42 213.158 1361.95 252.803 1311.24 258.903L645.905 343.276C597.222 349.375 562.738 360.557 536.368 379.871Z M104.57899999999998 1136.84a176.893 176.893 0 1 0 353.786 0a176.893 176.893 0 1 0 -353.786 0Z'
+
+// The first animation waits this long after the launcher opens, then one
+// plays every UPDATE_ANIMATION_EVERY_MS. Must match the keyframes' 10s
+// (globals.css), whose percentages place each step in the cycle.
+const UPDATE_ANIMATION_DELAY_MS = 1000
+const UPDATE_ANIMATION_EVERY_MS = 10_000
+
+/**
+ * The footer mark while an update is ready: a red dot, and 1s after each
+ * open, then every 10s, the note spins away and a short arc spins in its
+ * place, growing into a reload arrow (keyframes in globals.css). Hovering
+ * holds it still, after any run in progress finishes, and shows what a
+ * click does: restart into the new version.
+ */
+function UpdateMark({ version }: { version: string | null }) {
+    // Each run remounts the animated parts, which plays their keyframes once.
+    const [run, setRun] = useState(0)
+    const hovered = useRef(false)
+    useEffect(() => {
+        const play = () => {
+            if (!hovered.current) setRun((count) => count + 1)
+        }
+        let interval: ReturnType<typeof setInterval> | undefined
+        const first = setTimeout(() => {
+            play()
+            interval = setInterval(play, UPDATE_ANIMATION_EVERY_MS)
+        }, UPDATE_ANIMATION_DELAY_MS)
+        return () => {
+            clearTimeout(first)
+            clearInterval(interval)
+        }
+    }, [])
+
+    return (
+        <button
+            type="button"
+            aria-label={version ? `Restart to update to ${version}` : 'Restart to update'}
+            tabIndex={-1}
+            // Keeps the search box focused.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={window.musicBar.installUpdate}
+            onMouseEnter={() => (hovered.current = true)}
+            onMouseLeave={() => (hovered.current = false)}
+            className="group relative flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full bg-gradient-to-b from-[#2a2a2d] to-[#0a0a0a] ring-[0.7px] ring-white/20 ring-inset"
+        >
+            <span key={run} className={`absolute inset-0 flex items-center justify-center ${run > 0 ? 'update-run' : ''}`}>
+                <svg viewBox="0 0 824 824" className="update-note absolute inset-0 size-full" aria-hidden>
+                    <g transform="rotate(-10 412 412) translate(197.76 206.61) scale(0.29010)">
+                        <path d={MARK_NOTE_PATH} fill="#f2f2f2" fillRule="evenodd" />
+                    </g>
+                </svg>
+                {/* lucide's rotate-cw: its circle starts as a short spinning arc (pathLength 100 sets the dash units). */}
+                <svg
+                    viewBox="0 0 24 24"
+                    className="update-spin absolute size-[11px]"
+                    fill="none"
+                    stroke="#f2f2f2"
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                >
+                    <path className="update-reload-arc" d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" pathLength={100} />
+                    <path className="update-reload-head" d="M21 3v5h-5" pathLength={100} strokeDasharray="100 100" />
+                </svg>
+                <span className="update-dot absolute -top-0.5 -right-0.5 size-2 rounded-full bg-accent-bright ring-2 ring-base" />
+            </span>
+            <span className="pointer-events-none absolute bottom-full left-0 mb-2 rounded-md bg-elevated px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg ring-1 ring-white/10 transition duration-150 group-hover:opacity-100">
+                {version ? `Restart to update to ${version}` : 'Restart to update'}
+            </span>
+        </button>
     )
 }
 

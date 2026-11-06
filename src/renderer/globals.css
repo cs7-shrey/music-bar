@@ -73,3 +73,56 @@ body {
 .glass:hover {
     background: rgb(255 255 255 / 0.2);
 }
+
+/*
+ * The footer mark while an update is ready (UpdateMark in App.tsx). A red
+ * dot marks it at rest. Each run (UpdateMark starts one 1s after each open,
+ * then every 10s, unless the pointer is on it): the dot steps
+ * aside and the note spins away, a short arc spins in its place and, as it
+ * slows, grows into the reload arrow's circle; the arrowhead draws on, it
+ * holds, then the note comes back. Percentages are of the 10s cycle (1% =
+ * 0.1s).
+ */
+@keyframes update-note {
+    0% { opacity: 1; transform: none; }
+    5% { opacity: 0; transform: rotate(-120deg) scale(0.4); }
+    36% { opacity: 0; transform: rotate(120deg) scale(0.4); }
+    41%, 100% { opacity: 1; transform: none; }
+}
+@keyframes update-spin {
+    0% { opacity: 0; transform: rotate(-180deg); }
+    1.5% { opacity: 1; }
+    10% { transform: none; }
+    33% { opacity: 1; }
+    37%, 100% { opacity: 0; transform: none; }
+}
+@keyframes update-reload-arc {
+    0%, 4% { stroke-dasharray: 18 82; }
+    10%, 100% { stroke-dasharray: 100 0; }
+}
+@keyframes update-reload-head {
+    0%, 9% { stroke-dashoffset: 100; opacity: 0; }
+    9.5% { opacity: 1; }
+    12%, 100% { stroke-dashoffset: 0; opacity: 1; }
+}
+/* At rest, between runs. */
+.update-spin { opacity: 0; }
+
+@keyframes update-dot {
+    0% { opacity: 1; transform: none; }
+    3%, 39% { opacity: 0; transform: scale(0); }
+    43%, 100% { opacity: 1; transform: none; }
+}
+.update-run :is(.update-note, .update-spin, .update-reload-arc, .update-reload-head, .update-dot) {
+    animation-duration: 10s;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    animation-fill-mode: both;
+}
+.update-run .update-note { animation-name: update-note; }
+.update-run .update-spin { animation-name: update-spin; }
+.update-run .update-reload-arc { animation-name: update-reload-arc; }
+.update-run .update-reload-head { animation-name: update-reload-head; }
+.update-run .update-dot { animation-name: update-dot; }
+@media (prefers-reduced-motion: reduce) {
+    .update-run :is(.update-note, .update-spin, .update-reload-arc, .update-reload-head, .update-dot) { animation: none; }
+}

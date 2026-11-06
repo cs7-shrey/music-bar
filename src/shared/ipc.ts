@@ -61,6 +61,10 @@ export const IPC = {
      * screen until the user opens Music Bar with the shortcut.
      */
     setupFinish: 'setup:finish',
+    /** renderer → main (invoke): the downloaded update's version, or null. */
+    updateGet: 'update:get',
+    /** renderer → main: restart to install the downloaded update. */
+    updateInstall: 'update:install',
 } as const
 
 export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
@@ -203,4 +207,7 @@ export interface MusicBarApi {
     openBrowser(browser: BrowserName): Promise<void>
     openAutomationSettings(): Promise<void>
     finishSetup(): void
+    /** The version downloaded and waiting for a restart, or null. */
+    getUpdate(): Promise<string | null>
+    installUpdate(): void
 }

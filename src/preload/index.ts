@@ -40,6 +40,8 @@ const api: MusicBarApi = {
     openBrowser: (browser) => ipcRenderer.invoke(IPC.setupOpenBrowser, browser),
     openAutomationSettings: () => ipcRenderer.invoke(IPC.setupOpenAutomationSettings),
     finishSetup: () => ipcRenderer.send(IPC.setupFinish),
+    getUpdate: () => ipcRenderer.invoke(IPC.updateGet),
+    installUpdate: () => ipcRenderer.send(IPC.updateInstall),
 }
 
 contextBridge.exposeInMainWorld('musicBar', api)

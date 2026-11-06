@@ -84,6 +84,15 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   (`CGSSetSymbolicHotKeyEnabled`, as AltTab does for ⌘Tab) found by key
   combination, not id. It's system-wide and outlives a crash until the next
   launch or logout. If it fails, ⌥⇧Space is registered as well.
+- `src/main/updater.ts` — auto-update through Electron's `autoUpdater`
+  (Squirrel.Mac) and update.electronjs.org, which serves the zip attached
+  to each GitHub release; it needs the repo public and the app signed.
+  Checks hourly in packaged builds run from Applications, downloads in the
+  background, then offers "Restart to Update" in the menu bar menu, as a
+  launcher row, and on the launcher footer's mark (`UpdateMark` in
+  `App.tsx`: a red dot and a periodic note-to-reload animation, held while
+  hovered). Squirrel only installs an update signed by the same
+  Developer ID.
 - `src/main/log.ts` — the log file, `~/Library/Logs/Music Bar/main.log`
   ("Show Log File" in the menu bar menu), to ask users for when something
   breaks. Log user actions (`handleAction` in `index.ts` does it for IPC),
@@ -133,7 +142,9 @@ up-to-date `main` bumps `version` in `package.json`, commits
 `chore(release): vX.Y.Z`, tags it `vX.Y.Z` and pushes both. The tag runs
 `.github/workflows/release.yml` on GitHub's Apple silicon Macs: it builds
 the DMG (`pnpm make`) and publishes a GitHub release with it attached as
-`Music-Bar-X.Y.Z-arm64.dmg`. The notes come from `scripts/release-notes.mjs`:
+`Music-Bar-X.Y.Z-arm64.dmg`, plus `Music-Bar-darwin-arm64-X.Y.Z.zip` for
+auto-update. A release is what every installed copy updates to within an
+hour, so don't publish one that isn't ready. The notes come from `scripts/release-notes.mjs`:
 the `feat`, `fix` and `perf` commit summaries since the previous tag, so
 write those summaries for users. They end with install steps. Edit a
 release's notes on GitHub afterwards if needed. Never move or reuse a
