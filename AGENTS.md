@@ -150,6 +150,13 @@ write those summaries for users. They end with install steps. Edit a
 release's notes on GitHub afterwards if needed. Never move or reuse a
 published tag; release a new patch instead.
 
+The website (`../music-bar-website`, its own repo) links its download
+button to the DMG of one release, through `VERSION` in
+`src/app/page.tsx`. Once a release is published on GitHub (the workflow
+passed and the DMG is attached), set `VERSION` there to the new version,
+commit `chore: link the download to vX.Y.Z` and push. Not before: the link
+would point at a DMG that doesn't exist yet.
+
 Releases are signed with a Developer ID certificate and notarized
 (`osxSign`, `osxNotarize` and the `postMake` hook in `forge.config.ts`), so
 they open without Gatekeeper warnings. The app runs with the hardened
