@@ -1,7 +1,7 @@
 {
     "name": "music-bar",
     "productName": "Music Bar",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "private": true,
     "license": "MIT",
     "description": "Raycast-style launcher for controlling YouTube Music in Chromium browsers",
