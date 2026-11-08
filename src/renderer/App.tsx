@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
-import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, RefreshCw, Repeat1, Search } from 'lucide-react'
+import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, RefreshCw, Repeat1, Search, Settings } from 'lucide-react'
 import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
 import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying, WAITING } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
@@ -515,6 +515,7 @@ export default function App() {
                         <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />
                     )}
                     <Hint keys="esc" label={submitted !== null ? 'Back' : query ? 'Clear' : 'Close'} />
+                    <SettingsButton />
                 </span>
             </footer>
         </Command>
@@ -649,6 +650,25 @@ function CommandRow({
                 )}
             </span>
         </Command.Item>
+    )
+}
+
+/** The footer's way to settings, for those who don't know ⌘,. */
+function SettingsButton() {
+    return (
+        <button
+            type="button"
+            aria-label="Settings"
+            // Keep the keyboard in the search box.
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => window.musicBar.showSetup()}
+            className="group relative -mr-1.5 flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-white/10 hover:text-white"
+        >
+            <Settings className="size-4" strokeWidth={2.25} />
+            <span className="pointer-events-none absolute right-0 bottom-full mb-2 rounded-md bg-elevated px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg ring-1 ring-white/10 transition duration-150 group-hover:opacity-100">
+                Settings <span className="ml-1 text-faint">⌘,</span>
+            </span>
+        </button>
     )
 }
 
