@@ -1,13 +1,13 @@
 # Music Bar
 
-A Raycast-style launcher for YouTube Music on the Mac and Linux. Press
+A Raycast-style launcher for YouTube Music and Spotify on the Mac and Linux. Press
 ⌘⇧Space anywhere to see what's playing, skip, loop, start a radio, or
 search for a song and play it, without leaving what you're doing.
 
 Music Bar controls YouTube Music where it already plays: a tab in Brave,
 Chrome or Helium (on Linux: Brave, Chrome or Chromium). It has no player of
 its own, so your account, library, queue and Premium all work as they do in
-the browser.
+the browser. It can control the Spotify app too (see [Spotify](#spotify)).
 
 ## Install
 
@@ -58,6 +58,31 @@ quits. Your setting in System Settings isn't changed.
 Browsers don't let a page start sound until you've clicked in it once. If
 Music Bar can't start playback, it offers **Show Tab**: click play there
 once, and it works from then on.
+
+## Spotify
+
+Turn on Spotify in setup, or later in **Settings → Spotify**, and Music Bar
+controls the Spotify app as well: what's playing, play and pause, previous
+and next, and looping a song (not on the Mac, where Spotify's AppleScript
+can't loop one song). The card shows whichever is playing, YouTube Music
+or Spotify; searches go to the one you last played.
+
+On the Mac, macOS asks once whether Music Bar may control Spotify. On Linux
+it uses MPRIS, the interface Spotify offers for media keys, and asks for
+nothing.
+
+Searching Spotify and queueing songs (⇧↵) need your Spotify account, through
+Spotify's Web API. Music Bar has no servers, so you make your own app for
+it, which takes a minute:
+
+1. In the [Spotify developer dashboard](https://developer.spotify.com/dashboard),
+   create an app. Any name works. Tick **Web API**, and add the Redirect
+   URI `http://127.0.0.1:43117/callback`.
+2. In **Settings → Spotify**, paste the app's **Client ID** and click
+   **Connect**. Spotify asks you to sign in, in your browser.
+
+Playing a song from search needs no Premium; Spotify only lets Premium
+accounts add to the queue. Radio (⌘R, ⌘↵) is YouTube Music's only.
 
 ## Linux
 
@@ -148,7 +173,11 @@ on your Mac and in your browser.
 - Searches run inside your YouTube Music tab, the same requests the site
   makes when you search there. They go to YouTube, under your account, and
   nowhere else.
-- Album art is downloaded from the image servers YouTube Music uses.
+- Album art is downloaded from the image servers YouTube Music and Spotify
+  use.
+- With a Spotify account connected, Spotify searches go to Spotify's Web API,
+  under your account and your own app. The sign-in is kept encrypted in your
+  system's keyring where there is one.
 - Settings are in `~/Library/Application Support/Music Bar/` (Linux:
   `~/.config/Music Bar/`).
 - A log for troubleshooting is in `~/Library/Logs/Music Bar/` (Linux:

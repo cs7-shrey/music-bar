@@ -1,6 +1,7 @@
 # Music Bar
 
-Raycast-style launcher (⌘⇧Space) for controlling YouTube Music playing in a
+Raycast-style launcher (⌘⇧Space) for controlling YouTube Music (and the
+Spotify app) playing in a
 Chromium browser (Brave first, also Chrome and Helium; on Linux, Brave,
 Chrome and Chromium). macOS first; Linux too (Debian package, Nix flake).
 
@@ -71,6 +72,22 @@ macOS, and a browser extension on Linux (see Linux below).
   `needs-extension` (not installed or not connected), `needs-setup` ("Allow
   User Scripts" is off). Browsers are found on `PATH`, running ones in
   `/proc`, icons in the icon theme.
+- `src/main/players.ts` — YouTube Music and Spotify together: picks what
+  the card shows (what's playing, else the followed service, as
+  youtube-music.ts follows tabs) and sends each action to its track's
+  service (`TrackSource` is a tab or `{ service: 'spotify' }`). Search goes
+  to the followed service. Every IPC call that touches playback goes
+  through here.
+- `src/main/spotify.ts` — the Spotify desktop app: MPRIS through `busctl`
+  on Linux, AppleScript (`application id "com.spotify.client"`) on macOS.
+  Read only once the user turns Spotify on (`settings.spotify`), so no one
+  gets a macOS permission prompt they didn't ask for. Play/pause and loop
+  *set* states, as the debouncing rules below require. macOS can't loop
+  one song (its dictionary only has `repeating`). No radio for Spotify.
+- `src/main/spotify-account.ts` — Spotify's Web API, for search and the
+  queue: the user's own app's Client ID, OAuth with PKCE (no secret) and a
+  one-off server on `127.0.0.1:43117` for the redirect, the refresh token
+  encrypted with `safeStorage`. Keep tokens and the Client ID out of the log.
 - `src/main/youtube-music-search.ts` — search via YouTube Music's internal
   InnerTube API (`music/get_search_suggestions`, `search`), called from inside
   a YT Music tab so requests carry the user's session. Songs and videos are
