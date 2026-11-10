@@ -5,6 +5,7 @@ import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSon
 import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying, WAITING } from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 import markUrl from '../../assets/mark.svg'
+import { hasModifier, isMac, keys, SCRIPTING_SETUP } from './platform'
 
 const PLAY_PAUSE_COMMAND = 'Play or Pause'
 const LOOP_COMMAND = 'Loop Current Song'
@@ -17,6 +18,7 @@ const BROWSER_STATES: Record<BrowserState, { label: string; problem: string | nu
     'no-tab': { label: 'No tab', problem: null },
     'needs-setup': { label: 'Needs setup', problem: 'needs setup' },
     'needs-permission': { label: 'Needs permission', problem: 'needs permission' },
+    'needs-extension': { label: 'Needs extension', problem: 'needs the extension' },
     error: { label: 'Error', problem: "can't be reached" },
 }
 
@@ -28,15 +30,19 @@ function describeBrowser({ state, message }: BrowserStatus): string {
         case 'no-tab':
             return 'No YouTube Music tab open'
         case 'needs-setup':
-            return 'Turn on View → Developer → Allow JavaScript from Apple Events'
+            return isMac
+                ? 'Turn on View → Developer → Allow JavaScript from Apple Events'
+                : 'Turn on Allow User Scripts for the Music Bar extension'
         case 'needs-permission':
             return 'Allow Music Bar in System Settings → Privacy & Security → Automation'
+        case 'needs-extension':
+            return 'Add the Music Bar extension to it'
         case 'error':
             return message ?? 'Something went wrong'
     }
 }
 
-// ⌘R is free: the app menu has no Reload item (see index.ts).
+// ⌘R is free: the app menu has no Reload item, and Linux has no menu (see index.ts).
 const SHORTCUTS: Record<string, 'loop' | 'radio' | PlayerControl> = { o: 'loop', r: 'radio', h: 'previous', l: 'next' }
 
 export default function App() {
@@ -154,7 +160,7 @@ export default function App() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
         // ⌘↵ on a song starts a radio from it, then returns to the card.
-        if (event.key === 'Enter' && event.metaKey && selectedSong) {
+        if (event.key === 'Enter' && hasModifier(event) && selectedSong) {
             event.preventDefault()
             nowPlaying.startRadioFrom(selectedSong)
             reset()
@@ -168,14 +174,20 @@ export default function App() {
             return
         }
         // ⌘⇧O goes to the tab playing the song, like clicking the cover.
-        if (event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'o') {
+        if (hasModifier(event) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'o') {
             event.preventDefault()
             if (!event.repeat) nowPlaying.goToTab()
             return
         }
         // Player shortcuts work from anywhere, even mid-search: ⌘O loop,
         // ⌘R radio, ⌘H previous, ⌘L next.
-        const shortcut = event.metaKey && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]
+        // On macOS the app menu answers ⌘,; Linux has no menu (see index.ts).
+        if (!isMac && event.ctrlKey && !event.shiftKey && !event.altKey && event.key === ',') {
+            event.preventDefault()
+            window.musicBar.showSetup()
+            return
+        }
+        const shortcut = hasModifier(event) && !event.shiftKey && !event.altKey && SHORTCUTS[event.key.toLowerCase()]
         if (shortcut) {
             event.preventDefault()
             // A held key repeats about every 30ms; each of those would be one
@@ -279,7 +291,7 @@ export default function App() {
                           ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
                           : 'Nothing is playing'
                 }
-                shortcut="⌘O"
+                shortcut={keys('⌘O')}
                 // Dimmed rather than skipped: a missing row would push the
                 // selection onto a placeholder while the track loads.
                 muted={(!track && !nowPlaying.syncing) || isAd}
@@ -293,7 +305,7 @@ export default function App() {
                 subtitle={
                     isAd ? 'Not available during ads' : track ? `A mix based on “${track.title}”` : 'Nothing is playing'
                 }
-                shortcut="⌘R"
+                shortcut={keys('⌘R')}
                 muted={(!track && !nowPlaying.syncing) || isAd}
                 waiting={nowPlaying.queued.has('radio')}
                 onSelect={startRadio}
@@ -438,7 +450,7 @@ export default function App() {
                                 <ListNote>
                                     {nowPlaying.browsers.length === 0
                                         ? 'Open your browser to search'
-                                        : 'Set up a browser to search: View → Developer → Allow JavaScript from Apple Events'}
+                                        : `Set up a browser to search: ${SCRIPTING_SETUP}`}
                                 </ListNote>
                             )
                         ) : (
@@ -508,8 +520,8 @@ export default function App() {
                     {selectedSong ? (
                         <>
                             <Hint keys="↵" label="Play" />
-                            <Hint keys="⇧↵" label="Play next" />
-                            <Hint keys="⌘↵" label="Radio" />
+                            <Hint keys={keys('⇧↵')} label="Play next" />
+                            <Hint keys={keys('⌘↵')} label="Radio" />
                         </>
                     ) : (
                         <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />
@@ -666,7 +678,7 @@ function SettingsButton() {
         >
             <Settings className="size-4" strokeWidth={2.25} />
             <span className="pointer-events-none absolute right-0 bottom-full mb-2 rounded-md bg-elevated px-2 py-1 text-[11px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg ring-1 ring-white/10 transition duration-150 group-hover:opacity-100">
-                Settings <span className="ml-1 text-faint">⌘,</span>
+                Settings <span className="ml-1 text-faint">{keys('⌘,')}</span>
             </span>
         </button>
     )

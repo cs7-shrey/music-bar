@@ -25,6 +25,8 @@ function jxa(script: string): Promise<string> {
 }
 
 export async function frontmostApp(): Promise<FrontmostApp | null> {
+    // macOS only; elsewhere the window manager returns focus by itself.
+    if (process.platform !== 'darwin') return null
     try {
         const [pid, bundleId] = (
             await jxa(`const app = $.NSWorkspace.sharedWorkspace.frontmostApplication;
@@ -51,6 +53,7 @@ async function becameFrontmost(app: FrontmostApp): Promise<boolean> {
  * second, Launch Services is asked to open it, which always activates it.
  */
 export async function activateApp(app: FrontmostApp): Promise<boolean> {
+    if (process.platform !== 'darwin') return false
     try {
         await jxa(`$.NSRunningApplication.runningApplicationWithProcessIdentifier(${app.pid})
     .activateWithOptions($.NSApplicationActivateIgnoringOtherApps)`)

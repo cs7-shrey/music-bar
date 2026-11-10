@@ -8,6 +8,10 @@ function subscribe(channel: string, listener: () => void): () => void {
 }
 
 const api: MusicBarApi = {
+    // Only macOS and Linux are built.
+    platform: process.platform === 'darwin' ? 'darwin' : 'linux',
+    // From main (src/main/session.ts), which knows the platform Electron chose.
+    wayland: process.argv.includes('--music-bar-wayland'),
     hide: () => ipcRenderer.send(IPC.launcherHide),
     onShown: (listener) => subscribe(IPC.launcherShown, listener),
     onHidden: (listener) => subscribe(IPC.launcherHidden, listener),
@@ -39,6 +43,9 @@ const api: MusicBarApi = {
     checkBrowser: (browser) => ipcRenderer.invoke(IPC.setupCheck, browser),
     openBrowser: (browser) => ipcRenderer.invoke(IPC.setupOpenBrowser, browser),
     openAutomationSettings: () => ipcRenderer.invoke(IPC.setupOpenAutomationSettings),
+    getExtensionFolder: () => ipcRenderer.invoke(IPC.setupGetExtensionFolder),
+    showExtensionFolder: () => ipcRenderer.invoke(IPC.setupShowExtensionFolder),
+    openExtensionsPage: (browser) => ipcRenderer.invoke(IPC.setupOpenExtensionsPage, browser),
     finishSetup: () => ipcRenderer.send(IPC.setupFinish),
     getUpdate: () => ipcRenderer.invoke(IPC.updateGet),
     installUpdate: () => ipcRenderer.send(IPC.updateInstall),

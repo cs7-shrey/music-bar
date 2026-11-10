@@ -13,6 +13,7 @@ import {
     type BrowserCheck,
 } from './setup'
 import markUrl from '../../assets/mark.svg'
+import { hasModifier, isMac, isWayland, keyCaps, keys, SUPPORTED_BROWSERS, TOGGLE_COMMAND, TRAY } from './platform'
 
 // The settings window, which the setup window becomes once browsers are
 // chosen: a sidebar of sections and the chosen one beside it. Changes save
@@ -41,10 +42,10 @@ export default function Settings() {
     )
 
     useEffect(() => {
-        // ⌘W closes it, like any window. Not Esc: settings is a normal
-        // window, not the launcher.
+        // ⌘W (Linux: Ctrl+W) closes it, like any window. Not Esc: settings
+        // is a normal window, not the launcher.
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.metaKey && event.key.toLowerCase() === 'w') window.close()
+            if (hasModifier(event) && event.key.toLowerCase() === 'w') window.close()
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
@@ -54,7 +55,7 @@ export default function Settings() {
         <div className="flex h-full bg-base text-white">
             <nav className="flex w-[220px] shrink-0 flex-col border-r border-white/[0.06] bg-black/30 px-3 pb-4">
                 {/* Room for the traffic lights, and something to drag the window by. */}
-                <div className="h-12 shrink-0 [-webkit-app-region:drag]" />
+                <div className={`${isMac ? 'h-12' : 'h-6'} shrink-0 [-webkit-app-region:drag]`} />
                 <div className="flex items-center gap-2.5 px-2 pb-5">
                     <img src={markUrl} alt="" className="size-8" draggable={false} />
                     <span className="text-[15px] font-extrabold tracking-tight">Music Bar</span>
@@ -78,7 +79,7 @@ export default function Settings() {
                 </ul>
             </nav>
             <main className="flex min-w-0 flex-1 flex-col">
-                <div className="h-12 shrink-0 [-webkit-app-region:drag]" />
+                <div className={`${isMac ? 'h-12' : 'h-6'} shrink-0 [-webkit-app-region:drag]`} />
                 <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-10">
                     {/* Capped, so rows stay readable in a wide window. */}
                     <div className="max-w-[640px]">
@@ -123,7 +124,7 @@ function GeneralSection() {
                     <span className="text-[13px] font-medium text-subdued">
                         {loginItem?.available === false
                             ? 'Only in the built app, not in development.'
-                            : 'Starts quietly in the menu bar, so ⌘⇧Space works right after you log in.'}
+                            : `Starts quietly in the ${TRAY}, so ${isWayland ? 'your shortcut' : keys('⌘⇧Space')} works right after you log in.`}
                     </span>
                 </div>
                 <Switch
@@ -163,7 +164,7 @@ function BrowsersSection() {
             <SectionHeader title="Browsers" description="Music Bar only talks to the browsers turned on here." />
             {installed?.length === 0 && (
                 <p className="mt-6 text-sm font-medium text-subdued">
-                    Music Bar works with Brave, Chrome and Helium. Install one of them to use it.
+                    Music Bar works with {SUPPORTED_BROWSERS}. Install one of them to use it.
                 </p>
             )}
             <div className="mt-6 flex flex-col gap-2">
@@ -231,12 +232,19 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: { label: string; keys: string
     {
         title: 'Anywhere',
         shortcuts: [
-            {
-                label: 'Open Music Bar',
-                keys: ['⌘', '⇧', 'Space'],
-                // Borrowed from macOS (system-shortcuts.ts); say so.
-                note: 'Replaces Siri’s “Ask about the active window” while Music Bar is running.',
-            },
+            isWayland
+                ? {
+                      label: 'Open Music Bar',
+                      // Bound in the compositor, not by Music Bar (index.ts).
+                      keys: [],
+                      note: `Wayland: bind a key to “${TOGGLE_COMMAND}” in your desktop’s keyboard settings.`,
+                  }
+                : {
+                      label: 'Open Music Bar',
+                      keys: ['⌘', '⇧', 'Space'],
+                      // Borrowed from macOS (system-shortcuts.ts); say so.
+                      note: isMac ? 'Replaces Siri’s “Ask about the active window” while Music Bar is running.' : undefined,
+                  },
         ],
     },
     {
@@ -280,7 +288,7 @@ function ShortcutsSection() {
                                     <span className="text-sm font-semibold">{label}</span>
                                     {note && <span className="text-[13px] font-medium text-subdued">{note}</span>}
                                 </span>
-                                <ShortcutPill keys={keys} />
+                                {keys.length > 0 && <ShortcutPill keys={keyCaps(keys)} />}
                             </li>
                         ))}
                     </ul>

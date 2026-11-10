@@ -1,0 +1,12 @@
+{
+    "manifest_version": 3,
+    "name": "Music Bar",
+    "version": "1.0.1",
+    "description": "Lets the Music Bar app control YouTube Music in this browser.",
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAhbaGh4VSvCh3H7DDhYwidOymyBc8n/NGsUbQDXrA4ayVrMnmgbq2+cXfBDWeYRD3/qYLtgqPaoMYlUtdkQw1J4WVRIyorH/tbioS3K9y0A1UGdknIrJkaL/6mu9oI6vW3BRqtOsSwbL5eFBEtM2F5qD9djYq7zaiF7ka9d2Zc3hmQdV6KposLsVoqFzclJi16fNp+H0alD4Su6VybY8TdP3Kwaf+doUnDTCTauDmyiOYDe8m0Q4khbyMax1pX/KyJ7dxEqj9IcYsfmNDh98CBj7z15O5EuXUSqL6rV2ntGL6bJNvlRKFghhWxPncuO5XVzob4tl2wElsu97aWktzaQIDAQAB",
+    "minimum_chrome_version": "138",
+    "background": { "service_worker": "background.js" },
+    "permissions": ["nativeMessaging", "userScripts", "alarms"],
+    "host_permissions": ["https://music.youtube.com/*"],
+    "icons": { "128": "icon-128.png" }
+}

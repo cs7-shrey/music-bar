@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import koffi from 'koffi'
+import { loadKoffi } from './koffi'
 import { describe, logger } from './log'
 
 // Marks a window as a "system dialog" for macOS accessibility, the way
@@ -13,7 +13,10 @@ import { describe, logger } from './log'
 const log = logger('system-dialog')
 
 export function markAsSystemDialog(window: BrowserWindow): void {
+    // Window managers on other platforms go by the window type instead.
+    if (process.platform !== 'darwin') return
     try {
+        const koffi = loadKoffi()
         const objc = koffi.load('/usr/lib/libobjc.A.dylib')
         const selector = objc.func('void *sel_registerName(const char *)')
         const getClass = objc.func('void *objc_getClass(const char *)')
