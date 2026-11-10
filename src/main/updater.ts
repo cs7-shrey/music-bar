@@ -35,6 +35,9 @@ export function startUpdater(onReady: (version: string) => void): void {
     // replace an app run from the DMG or Downloads, so updates wait until
     // it's in Applications.
     if (!app.isPackaged) return
+    // Squirrel.Mac is macOS only. On Linux, updates come with the package
+    // (a new .deb, or the Nix flake).
+    if (process.platform !== 'darwin') return
     if (!app.isInApplicationsFolder()) {
         log.info('not in Applications; updates are off')
         return

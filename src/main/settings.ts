@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync } from 'fs'
+import { chmodSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { BrowserName } from '../shared/ipc'
 
@@ -14,9 +14,22 @@ export interface Settings {
      * Until it is, setup stays open on its last screen, which teaches it.
      */
     awaitingShortcut: boolean
+    /** Music Bar reads and controls the Spotify app. Off until turned on, like browsers. */
+    spotify: boolean
+    /**
+     * The user's own Spotify app (developer.spotify.com), for search and the
+     * queue through Spotify's Web API. Null until connected.
+     */
+    spotifyAccount: {
+        clientId: string
+        /** The refresh token, encrypted with safeStorage when the system can (base64). */
+        refreshToken: string
+        encrypted: boolean
+        displayName: string | null
+    } | null
 }
 
-const DEFAULTS: Settings = { browsers: null, awaitingShortcut: false }
+const DEFAULTS: Settings = { browsers: null, awaitingShortcut: false, spotify: false, spotifyAccount: null }
 
 let cached: Settings | null = null
 
@@ -35,5 +48,7 @@ export function getSettings(): Settings {
 
 export function updateSettings(changes: Partial<Settings>): void {
     cached = { ...getSettings(), ...changes }
-    writeFileSync(settingsFile(), JSON.stringify(cached, null, 4))
+    // Only this user may read it: it holds the Spotify sign-in.
+    writeFileSync(settingsFile(), JSON.stringify(cached, null, 4), { mode: 0o600 })
+    chmodSync(settingsFile(), 0o600)
 }

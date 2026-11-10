@@ -50,7 +50,7 @@ function useSearchRequest(
     }
 }
 
-export const songValue = (song: SearchSong) => `song:${song.videoId}`
+export const songValue = (song: SearchSong) => `song:${song.service}:${song.id}`
 export const searchValue = (query: string) => `search:${query}`
 
 export function SearchRow({ query, label, onSelect }: { query: string; label: string; onSelect: () => void }) {

@@ -1,7 +1,9 @@
 # Music Bar
 
-Raycast-style launcher (⌘⇧Space) for controlling YouTube Music playing in a
-Chromium browser (Brave first, also Chrome and Helium). macOS only.
+Raycast-style launcher (⌘⇧Space) for controlling YouTube Music (and the
+Spotify app) playing in a
+Chromium browser (Brave first, also Chrome and Helium; on Linux, Brave,
+Chrome and Chromium). macOS first; Linux too (Debian package, Nix flake).
 
 ## Package manager
 
@@ -11,7 +13,8 @@ Use **pnpm** for everything. Do not use npm or yarn, and do not commit a
 - `pnpm install`
 - `pnpm dev` — run the app with Vite HMR (Electron Forge)
 - `pnpm typecheck` — typecheck main/preload and renderer
-- `pnpm build` / `pnpm make` — package the app / build a zip
+- `pnpm build` / `pnpm make` — package the app / build the DMG and zip
+  (macOS) or the .deb (Linux, needs `dpkg` and `fakeroot`)
 - `pnpm icons` — regenerate the app icon and menu bar icon from `assets/note.svg`
 - `pnpm release <patch|minor|major|x.y.z>` — cut a release (see Releasing)
 
@@ -24,19 +27,25 @@ binary on first launch, not at install time.
 ## Stack
 
 Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
-`lucide-react` for icons. Browser control is AppleScript via `osascript`.
+`lucide-react` for icons. Browser control is AppleScript via `osascript` on
+macOS, and a browser extension on Linux (see Linux below).
 
 ## Layout
 
 - `src/main/` — Electron main process. `launcher-window.ts` owns the floating
   panel (show/hide/position); `index.ts` wires the global shortcut and tray.
 - `src/main/youtube-music.ts` — the YouTube Music bridge. Runs JavaScript in
-  YT Music tabs through each browser's AppleScript `execute javascript`
-  (works on background tabs). Requires View → Developer → Allow JavaScript
-  from Apple Events in each browser. Scripts address each browser by bundle
-  id (`BUNDLE_IDS`), never by name: macOS can resolve a name like "Brave
-  Browser" to another app (Helium, on one Mac). No accessibility tree: Chromium only
-  exposes the front tab's page to it.
+  YT Music tabs (works on background tabs) through a `TabTransport`
+  (`tab-transport.ts`), the one platform-specific layer: listing tabs,
+  running a script in one, showing a tab and switching back, opening one.
+  Everything above it (following tabs, waking, the autoplay probe, every
+  script) is shared, so a feature written once works on both.
+- `src/main/mac-transport.ts` — macOS: each browser's AppleScript `execute
+  javascript`. Requires View → Developer → Allow JavaScript from Apple
+  Events in each browser. Scripts address each browser by bundle id
+  (`BUNDLE_IDS`), never by name: macOS can resolve a name like "Brave
+  Browser" to another app (Helium, on one Mac). No accessibility tree:
+  Chromium only exposes the front tab's page to it.
   Scripts run in the browser's isolated world: DOM and cookies are shared
   with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`
   cannot await; use `evaluateAsyncInTab` for anything async.
@@ -46,6 +55,39 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   don't count. Actions that start playback probe for this first
   (`isPlaybackBlocked`); a blocked tab reports `playBlocked`, and the
   launcher offers Show Tab so the user can click play once.
+- `src/main/linux-transport.ts` + `extension/` + `native-host/` — Linux.
+  The Music Bar extension (MV3, loaded unpacked, id fixed by `key` in its
+  manifest) runs scripts with `chrome.userScripts.execute` in the user
+  script world, the counterpart of the AppleScript world, and talks to the
+  app through native messaging: the browser starts
+  `native-host/music-bar-host.js` (Music Bar's own Electron run as Node,
+  through a script the app writes to its data folder), which relays to a
+  Unix socket in `$XDG_RUNTIME_DIR/music-bar/` (0700). At each start the
+  app copies the extension to `~/.config/Music Bar/extension` (the path the
+  user loads, stable across updates), registers the host in every
+  supported browser's `NativeMessagingHosts`, and has an outdated extension
+  reload itself. The extension can only reach music.youtube.com (its only
+  host permission). It relaxes its user script world's CSP to allow inline
+  scripts, or `inPageWorld` can't add its `<script>`. Setup's states:
+  `needs-extension` (not installed or not connected), `needs-setup` ("Allow
+  User Scripts" is off). Browsers are found on `PATH`, running ones in
+  `/proc`, icons in the icon theme.
+- `src/main/players.ts` — YouTube Music and Spotify together: picks what
+  the card shows (what's playing, else the followed service, as
+  youtube-music.ts follows tabs) and sends each action to its track's
+  service (`TrackSource` is a tab or `{ service: 'spotify' }`). Search goes
+  to the followed service. Every IPC call that touches playback goes
+  through here.
+- `src/main/spotify.ts` — the Spotify desktop app: MPRIS through `busctl`
+  on Linux, AppleScript (`application id "com.spotify.client"`) on macOS.
+  Read only once the user turns Spotify on (`settings.spotify`), so no one
+  gets a macOS permission prompt they didn't ask for. Play/pause and loop
+  *set* states, as the debouncing rules below require. macOS can't loop
+  one song (its dictionary only has `repeating`). No radio for Spotify.
+- `src/main/spotify-account.ts` — Spotify's Web API, for search and the
+  queue: the user's own app's Client ID, OAuth with PKCE (no secret) and a
+  one-off server on `127.0.0.1:43117` for the redirect, the refresh token
+  encrypted with `safeStorage`. Keep tokens and the Client ID out of the log.
 - `src/main/youtube-music-search.ts` — search via YouTube Music's internal
   InnerTube API (`music/get_search_suggestions`, `search`), called from inside
   a YT Music tab so requests carry the user's session. Songs and videos are
@@ -71,14 +113,17 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   `rm ~/Library/Application\ Support/Music\ Bar/settings.json` and
   `tccutil reset AppleEvents dev.shrey.music-bar`.
 - `src/main/frontmost-app.ts` — reads and restores the frontmost app through
-  AppKit (JXA), no Automation permission needed. Opening YouTube Music brings
+  AppKit (JXA), no Automation permission needed. macOS only. Opening YouTube Music brings
   the browser forward; this puts the user's app back in front.
 - `src/main/login-item.ts` — open at login, as a LaunchAgent the app writes
   to `~/Library/LaunchAgents/dev.shrey.music-bar.plist` (the file existing
   is the setting). Not Electron's login item: on macOS 13+ it can't say the
   app was opened at login. launchd passes `--login`, and a login launch
   stays in the menu bar instead of showing the launcher. Packaged app only.
-- `src/main/system-shortcuts.ts` — macOS 27 gives ⌘⇧Space to Siri, and a
+  Linux: an XDG autostart entry, `~/.config/autostart/music-bar.desktop`.
+- `src/main/system-shortcuts.ts`, `src/main/system-dialog.ts` — macOS only,
+  through `koffi` (`src/main/koffi.ts` loads it on first use, never on
+  Linux, which doesn't ship its binaries). macOS 27 gives ⌘⇧Space to Siri, and a
   system shortcut beats an app's. Music Bar turns the system one off while it
   runs and back on at quit, through private CoreGraphics calls
   (`CGSSetSymbolicHotKeyEnabled`, as AltTab does for ⌘Tab) found by key
@@ -93,7 +138,11 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   `App.tsx`: a red dot and a periodic note-to-reload animation, held while
   hovered). Squirrel only installs an update signed by the same
   Developer ID.
+- `src/main/resources.ts` — files shipped beside the app (`extraResource`):
+  read them with `resourcePath()`, which finds them next to `app.asar` (Nix
+  runs the app with a shared Electron, so not `process.resourcesPath`).
 - `src/main/log.ts` — the log file, `~/Library/Logs/Music Bar/main.log`
+  (Linux: `~/.config/Music Bar/logs/main.log`)
   ("Show Log File" in the menu bar menu), to ask users for when something
   breaks. Log user actions (`handleAction` in `index.ts` does it for IPC),
   failures, and state changes, not every poll. Keep search queries and
@@ -101,14 +150,30 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
 - `src/preload/` — exposes `window.musicBar` via `contextBridge`.
 - `src/shared/` — IPC channel names and the `MusicBarApi` type, shared by all
   processes. Add every new IPC channel here.
-- `src/renderer/` — the launcher UI.
+- `src/renderer/` — the launcher UI. `platform.ts` has what differs: write
+  shortcuts the macOS way (`'⌘⇧O'`) and show them with `keys()`; read ⌘ with
+  `hasModifier()` (Ctrl on Linux).
+- `nix/package.nix` + `flake.nix` — the Nix package: built from source with
+  Forge, given nixpkgs' Electron as the zip to package
+  (`MUSIC_BAR_ELECTRON_ZIP_DIR`), and run with that Electron. Update its
+  `hash` when `pnpm-lock.yaml` changes (`nix build` prints the new one).
 - `assets/` — `note.svg` is the logo's source. `scripts/build-icons.mjs` turns
   it into `icon.icns` (app icon on Apple's rounded tile) and
   `trayTemplate.png` / `@2x` (menu bar template image), and
   `dmg-background.png` / `@2x` (the installer window). The generated files
-  are committed; rerun `pnpm icons` after changing `note.svg`.
+  are committed; rerun `pnpm icons` after changing `note.svg`. Linux gets
+  `icon.png`, `tray.png` / `@2x` (the mark, as Linux panels can't tint a
+  template) and `extension/icon-128.png`; the .icns and DMG background are
+  only rendered on macOS.
 
 ## Conventions
+
+- Linux: Ctrl does what ⌘ does. There's no app menu (it would show as a
+  bar in each window), so the launcher handles Ctrl+, itself. Wayland
+  compositors don't give apps global keys or window placement: the
+  launcher opens from `music-bar --toggle` (the single-instance hand-off,
+  `TOGGLE_FLAG` in `index.ts`), bound to a key by the user, and its window
+  is titled `Music Bar Launcher` (`LAUNCHER_TITLE`) for float rules.
 
 - The app runs as a background (accessory) app: no Dock icon, tray item only.
 - Always dark: `nativeTheme.themeSource = 'dark'` in main. Do not add a light theme yet.
@@ -143,7 +208,9 @@ up-to-date `main` bumps `version` in `package.json`, commits
 `.github/workflows/release.yml` on GitHub's Apple silicon Macs: it builds
 the DMG (`pnpm make`) and publishes a GitHub release with it attached as
 `Music-Bar-X.Y.Z-arm64.dmg`, plus `Music-Bar-darwin-arm64-X.Y.Z.zip` for
-auto-update. A release is what every installed copy updates to within an
+auto-update. A second job then builds `music-bar_X.Y.Z_amd64.deb` on
+Ubuntu and attaches it. Linux has no auto-update: users update the .deb or
+their flake input. A release is what every installed copy updates to within an
 hour, so don't publish one that isn't ready. The notes come from `scripts/release-notes.mjs`:
 the `feat`, `fix` and `perf` commit summaries since the previous tag, so
 write those summaries for users. They end with install steps. Edit a

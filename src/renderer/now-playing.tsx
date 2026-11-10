@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Music2, Pause, Play } from 'lucide-react'
-import type {
-    BrowserName,
-    BrowserStatus,
-    NowPlaying as NowPlayingState,
-    PlayerControl,
-    RepeatMode,
-    SearchSong,
-    Track,
+import {
+    isSpotify,
+    type BrowserName,
+    type BrowserStatus,
+    type NowPlaying as NowPlayingState,
+    type PlayerControl,
+    type RepeatMode,
+    type SearchSong,
+    type Track,
+    type TrackSource,
 } from '../shared/ipc'
+import { hasModifier, isMac, keys, MODIFIER_KEY } from './platform'
 
 const POLL_MS = 2000
 // While a song loads, reads come this often, so "Fetching…" ends soon after
@@ -49,7 +52,25 @@ export type PressedOn = 'card' | 'list'
 
 const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.artist
 
-export const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
+export const BROWSER_NAMES: Record<BrowserName, string> = {
+    'Brave Browser': 'Brave',
+    'Google Chrome': 'Chrome',
+    Helium: 'Helium',
+    Chromium: 'Chromium',
+}
+
+/** What a track plays in: the browser's short name, or Spotify. */
+export const playerName = (source: TrackSource) => (isSpotify(source) ? 'Spotify' : BROWSER_NAMES[source.browser])
+
+/** Radio is YouTube Music's "Start mix"; Spotify has no way in for it. */
+export const canStartRadio = (track: Track | null) => !!track && !track.isAd && !isSpotify(track.source)
+
+/** Looping one song: Spotify's AppleScript can't, so not for Spotify on macOS. */
+export const canLoop = (track: Track | null) => !!track && !track.isAd && !(isMac && isSpotify(track.source))
+
+/** An IPC error's own message, without Electron's "Error invoking remote method …" in front. */
+export const errorMessage = (error: unknown) =>
+    (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
@@ -295,7 +316,7 @@ export function useNowPlaying() {
     const toggleLoop = (on: PressedOn) =>
         syncingRef.current
             ? queue('loop', on)
-            : !latestTrack.current?.isAd &&
+            : canLoop(latestTrack.current) &&
               debouncedToggle(
                   'loop',
                   (current) => ({ ...current, repeatMode: current.repeatMode === 'ONE' ? 'NONE' : 'ONE' }),
@@ -339,7 +360,7 @@ export function useNowPlaying() {
     /** A radio from the current song; it keeps playing, with a new queue after it. */
     const startRadio = () => {
         if (syncingRef.current) return queue('radio', 'list')
-        if (!track || track.isAd) return
+        if (!track || !canStartRadio(track)) return
         const { source } = track
         debounceAction(
             'radio',
@@ -529,21 +550,20 @@ export function NowPlaying({
             artwork={artwork}
             // Clickable once synced, so it never opens a tab from stale state.
             onArtworkClick={syncing ? undefined : goToTab}
+            artworkLabel={isSpotify(track.source) ? 'Show Spotify' : 'Go to the tab playing this'}
             artworkWaiting={queued.has('tab')}
             artworkPressed={coverPressed}
-            artworkShortcut={showShortcuts ? '⌘⇧O' : undefined}
+            artworkShortcut={showShortcuts ? keys('⌘⇧O') : undefined}
             eyebrow={
                 track.playBlocked
-                    ? `${BROWSER_NAMES[track.source.browser]} blocked playback`
+                    ? `${playerName(track.source)} blocked playback`
                     : track.isLoading
                       ? 'Fetching…'
                       : track.isAd
                         ? track.isPlaying
                             ? 'Ad playing'
                             : 'Ad paused'
-                        : track.isPlaying
-                          ? 'Now playing'
-                          : 'Paused'
+                        : `${track.isPlaying ? 'Now playing' : 'Paused'}${isSpotify(track.source) ? ' · Spotify' : ''}`
             }
             controls={
                 <div className="flex items-center gap-1.5">
@@ -551,22 +571,24 @@ export function NowPlaying({
                         label={
                             track.isAd
                                 ? 'Not available during ads'
-                                : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`
+                                : !canLoop(track)
+                                  ? `${repeatLabel} · Spotify can't loop one song from Music Bar on macOS`
+                                  : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (${keys('⌘O')})`
                         }
                         onClick={() => toggleLoop('card')}
                         active={track.repeatMode !== 'NONE'}
-                        disabled={track.isAd}
+                        disabled={!canLoop(track)}
                         waiting={queued.get('loop') === 'card'}
-                        shortcut={showShortcuts && !track.isAd ? '⌘O' : undefined}
+                        shortcut={showShortcuts && canLoop(track) ? keys('⌘O') : undefined}
                     >
                         <RepeatIcon mode={track.repeatMode} />
                     </IconButton>
                     <IconButton
-                        label="Previous (⌘H)"
+                        label={`Previous (${keys('⌘H')})`}
                         onClick={() => control('previous')}
                         pressed={pressed === 'previous'}
                         active
-                        shortcut={showShortcuts ? '⌘H' : undefined}
+                        shortcut={showShortcuts ? keys('⌘H') : undefined}
                     >
                         <SkipIcon direction="previous" />
                     </IconButton>
@@ -586,11 +608,11 @@ export function NowPlaying({
                         )}
                     </button>
                     <IconButton
-                        label="Next (⌘L)"
+                        label={`Next (${keys('⌘L')})`}
                         onClick={() => control('next')}
                         pressed={pressed === 'next'}
                         active
-                        shortcut={showShortcuts ? '⌘L' : undefined}
+                        shortcut={showShortcuts ? keys('⌘L') : undefined}
                     >
                         <SkipIcon direction="next" />
                     </IconButton>
@@ -611,7 +633,7 @@ export function NowPlaying({
                 !track.isPlaying && (
                     <p className="truncate text-xs font-medium text-subdued">
                         <span className="mr-1.5 inline-block size-1.5 rounded-full bg-accent align-middle" />
-                        {BROWSER_NAMES[track.source.browser]} hasn't loaded this tab yet · Play opens it for a moment
+                        {playerName(track.source)} hasn't loaded this tab yet · Play opens it for a moment
                     </p>
                 )
             )}
@@ -627,6 +649,7 @@ function Hero({
     controls,
     footer,
     onArtworkClick,
+    artworkLabel,
     artworkWaiting,
     artworkPressed,
     artworkShortcut,
@@ -635,6 +658,8 @@ function Hero({
     artwork: ArtworkState
     /** Makes the cover a button. */
     onArtworkClick?: () => void
+    /** What clicking the cover does. */
+    artworkLabel?: string
     /** The cover's action was pressed while syncing and runs once it's done. */
     artworkWaiting?: boolean
     /** Shows the cover as pressed, for the shortcut that triggers it. */
@@ -653,6 +678,7 @@ function Hero({
                 <Artwork
                     artwork={artwork}
                     onClick={onArtworkClick}
+                    label={artworkLabel}
                     waiting={artworkWaiting}
                     pressed={artworkPressed}
                     shortcut={artworkShortcut}
@@ -671,12 +697,14 @@ function Hero({
 function Artwork({
     artwork,
     onClick,
+    label = 'Go to the tab playing this',
     waiting,
     pressed,
     shortcut,
 }: {
     artwork: ArtworkState
     onClick?: () => void
+    label?: string
     waiting?: boolean
     pressed?: boolean
     shortcut?: string
@@ -687,8 +715,8 @@ function Artwork({
             {onClick ? (
                 <button
                     type="button"
-                    aria-label="Go to the tab playing this (⌘⇧O)"
-                    title="Go to the tab playing this (⌘⇧O)"
+                    aria-label={`${label} (${keys('⌘⇧O')})`}
+                    title={`${label} (${keys('⌘⇧O')})`}
                     tabIndex={-1}
                     // Keep focus in the search input.
                     onMouseDown={(event) => event.preventDefault()}
@@ -780,7 +808,7 @@ function IconButton({
 }
 
 /**
- * Whether ⌘ is held on its own, as macOS menus and Raycast use it: the player
+ * Whether ⌘ (Linux: Ctrl) is held on its own, as macOS menus and Raycast use it: the player
  * buttons then show their shortcuts (⌘H previous, ⌘L next, ⌘O loop, ⌘⇧O
  * go to the tab), which
  * nothing else on screen teaches.
@@ -798,16 +826,16 @@ function useCommandHeld(): boolean {
             setHeld(false)
         }
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Meta') {
+            if (event.key === MODIFIER_KEY) {
                 if (timer === undefined) timer = setTimeout(() => setHeld(true), SHORTCUT_HINT_DELAY_MS)
-            } else if (event.metaKey) {
+            } else if (hasModifier(event)) {
                 // A shortcut before the delay: no hints. Once they show, they
                 // stay while ⌘ is down, so several skips in a row keep them.
                 cancel()
             } else release()
         }
         const onKeyUp = (event: KeyboardEvent) => {
-            if (event.key === 'Meta') release()
+            if (event.key === MODIFIER_KEY) release()
         }
         window.addEventListener('keydown', onKeyDown)
         window.addEventListener('keyup', onKeyUp)

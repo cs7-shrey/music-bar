@@ -1,4 +1,4 @@
-import koffi from 'koffi'
+import { loadKoffi } from './koffi'
 import { describe, logger } from './log'
 
 // Borrows a key combination from macOS's own shortcuts while Music Bar runs.
@@ -27,7 +27,7 @@ let cgs: {
 
 function loadCgs(): NonNullable<typeof cgs> {
     if (cgs) return cgs
-    const lib = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    const lib = loadKoffi().load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
     cgs = {
         getValue: lib.func('int CGSGetSymbolicHotKeyValue(int, _Out_ uint16_t *, _Out_ uint16_t *, _Out_ uint32_t *)'),
         isEnabled: lib.func('bool CGSIsSymbolicHotKeyEnabled(int)'),
@@ -45,6 +45,8 @@ const borrowed = new Set<number>()
  * be done, and the accelerator likely won't reach Music Bar.
  */
 export function borrowSystemShortcut(accelerator: string): boolean {
+    // Only macOS has system shortcuts that outrank an app's.
+    if (process.platform !== 'darwin') return true
     const parts = accelerator.split('+')
     const keyCode = KEY_CODES[parts.at(-1) ?? '']
     const modifiers = parts.slice(0, -1).reduce((flags, part) => flags | (MODIFIER_FLAGS[part] ?? NaN), 0)

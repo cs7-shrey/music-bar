@@ -7,7 +7,8 @@ import { logger } from './log'
 // retry drop its connections without touching the launcher's own (which in
 // dev include the live-reload socket).
 
-const ALLOWED_HOSTS = /(^|\.)(googleusercontent\.com|ytimg\.com|ggpht\.com)$/
+// YouTube Music's image hosts, and Spotify's.
+const ALLOWED_HOSTS = /(^|\.)(googleusercontent\.com|ytimg\.com|ggpht\.com|scdn\.co|spotifycdn\.com)$/
 const ATTEMPT_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [500, 2000, 5000]
 const CACHE_SIZE = 30

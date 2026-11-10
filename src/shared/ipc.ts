@@ -25,7 +25,7 @@ export const IPC = {
     searchSuggest: 'search:suggest',
     /** renderer → main (invoke): the full search, as on /search?q=. */
     searchRun: 'search:run',
-    /** renderer → main (invoke): play a song now in the followed tab. */
+    /** renderer → main (invoke): play a song now, in the followed tab or in Spotify. */
     playNow: 'player:play-now',
     /** renderer → main (invoke): queue a song right after the current one. */
     playNext: 'player:play-next',
@@ -56,11 +56,29 @@ export const IPC = {
     setupOpenBrowser: 'setup:open-browser',
     /** renderer → main (invoke): open System Settings → Privacy & Security → Automation. */
     setupOpenAutomationSettings: 'setup:open-automation-settings',
+    /** renderer → main (invoke): Linux; the folder to load the browser extension from. */
+    setupGetExtensionFolder: 'setup:get-extension-folder',
+    /** renderer → main (invoke): Linux; show that folder in the file manager. */
+    setupShowExtensionFolder: 'setup:show-extension-folder',
+    /** renderer → main (invoke): Linux; open a browser's extensions page. */
+    setupOpenExtensionsPage: 'setup:open-extensions-page',
     /**
      * renderer → main: setup's checks are done. Setup stays on its last
      * screen until the user opens Music Bar with the shortcut.
      */
     setupFinish: 'setup:finish',
+    /** renderer → main (invoke): Spotify's state and account connection. */
+    spotifyGet: 'spotify:get',
+    /** renderer → main (invoke): turn Spotify on or off. */
+    spotifySetEnabled: 'spotify:set-enabled',
+    /** renderer → main (invoke): launch the Spotify app. */
+    spotifyOpen: 'spotify:open',
+    /** renderer → main (invoke): sign in to Spotify with a Client ID; resolves once signed in. */
+    spotifyConnect: 'spotify:connect',
+    /** renderer → main (invoke): forget the Spotify account. */
+    spotifyDisconnect: 'spotify:disconnect',
+    /** renderer → main (invoke): open Spotify's developer dashboard, to make an app. */
+    spotifyOpenDashboard: 'spotify:open-dashboard',
     /** renderer → main (invoke): the downloaded update's version, or null. */
     updateGet: 'update:get',
     /** renderer → main: restart to install the downloaded update. */
@@ -69,9 +87,10 @@ export const IPC = {
     updateReady: 'update:ready',
 } as const
 
-export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
+/** Helium on macOS only, Chromium on Linux only. */
+export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium' | 'Chromium'
 
-export type SettingsSection = 'general' | 'browsers' | 'shortcuts'
+export type SettingsSection = 'general' | 'browsers' | 'spotify' | 'shortcuts'
 
 export interface LoginItemInfo {
     enabled: boolean
@@ -79,12 +98,28 @@ export interface LoginItemInfo {
     available: boolean
 }
 
-/** Identifies the browser tab a track is playing in. */
-export interface TrackSource {
+/** Where music plays: YouTube Music in a browser tab, or the Spotify app. */
+export type Service = 'youtube-music' | 'spotify'
+
+/** Identifies the browser tab a YouTube Music track is playing in. */
+export interface TabSource {
+    service?: undefined
     browser: BrowserName
     windowId: number
     tabId: number
 }
+
+/** A track playing in the Spotify desktop app. */
+export interface SpotifySource {
+    service: 'spotify'
+}
+
+/** Where a track is playing. */
+export type TrackSource = TabSource | SpotifySource
+
+export const isSpotify = (source: TrackSource): source is SpotifySource => source.service === 'spotify'
+
+export const serviceOf = (source: TrackSource): Service => (isSpotify(source) ? 'spotify' : 'youtube-music')
 
 /** YouTube Music's `repeat-mode` attribute: off, whole queue, current song. */
 export type RepeatMode = 'NONE' | 'ALL' | 'ONE'
@@ -119,15 +154,21 @@ export interface Track {
     source: TrackSource
 }
 
+/** A track in a YouTube Music tab. */
+export type TabTrack = Track & { source: TabSource }
+
 /**
  * Whether Music Bar can use an open browser:
  * - connected: has a YouTube Music tab it can read and control
  * - no-tab: open, but no YouTube Music tab
- * - needs-setup: "Allow JavaScript from Apple Events" is off (error 12)
+ * - needs-setup: scripts can't run in its tabs: on macOS, "Allow JavaScript
+ *   from Apple Events" is off (error 12); on Linux, "Allow User Scripts" is
+ *   off for the Music Bar extension
  * - needs-permission: macOS hasn't allowed Music Bar to control it (error -1743)
+ * - needs-extension: Linux only; the Music Bar extension isn't installed or connected
  * - error: anything else; see message
  */
-export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'error'
+export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'needs-extension' | 'error'
 
 /** A browser's state during setup: as above, or not open, so it can't be checked yet. */
 export type BrowserSetupState = BrowserState | 'not-running'
@@ -144,6 +185,10 @@ export interface SetupInfo {
     chosen: BrowserName[] | null
     /** Setup is done and waits for the first ⌘⇧Space. */
     awaitingShortcut: boolean
+    /** The Spotify app is installed, so setup offers it. */
+    spotifyInstalled: boolean
+    /** Spotify is turned on. */
+    spotify: boolean
 }
 
 export interface BrowserStatus {
@@ -156,15 +201,45 @@ export type NowPlaying = (
     | { status: 'track'; track: Track }
     | { status: 'none' }
     /** A YT Music tab Brave hasn't loaded yet (restored at launch, or discarded to save memory). */
-    | { status: 'unloaded'; source: TrackSource }
+    | { status: 'unloaded'; source: TabSource }
     | { status: 'error'; message: string }
 ) & {
     /** Every open supported browser and whether Music Bar can use it. Full reads only. */
     browsers?: BrowserStatus[]
+    /** The Spotify app, when it's turned on in settings. Full reads only. */
+    spotify?: SpotifyState
+}
+
+/**
+ * The Spotify desktop app:
+ * - ready: running, and Music Bar can read and control it
+ * - not-running: not open
+ * - needs-permission: macOS hasn't allowed Music Bar to control it
+ * - not-installed: not on this computer
+ * - error: anything else
+ */
+export type SpotifyState = 'ready' | 'not-running' | 'needs-permission' | 'not-installed' | 'error'
+
+/** What Settings → Spotify shows. */
+export interface SpotifyInfo {
+    enabled: boolean
+    state: SpotifyState
+    /** Spotify's account connection (Web API), for search and the queue. */
+    account: {
+        clientId: string | null
+        /** The Spotify user's display name, once connected. */
+        connectedAs: string | null
+        /** The address to add as a Redirect URI in the Spotify app's settings. */
+        redirectUri: string
+    }
+    /** Looping one song: not on macOS, where Spotify's AppleScript can't. */
+    canLoop: boolean
 }
 
 export interface SearchSong {
-    videoId: string
+    service: Service
+    /** YouTube's video id, or Spotify's track id. */
+    id: string
     title: string
     artist: string
     kind: 'song' | 'video'
@@ -172,12 +247,16 @@ export interface SearchSong {
 }
 
 export type SearchResults =
-    | { status: 'ok'; suggestions: string[]; songs: SearchSong[] }
+    | { status: 'ok'; service: Service; suggestions: string[]; songs: SearchSong[] }
     | { status: 'error'; message: string }
 
 export type PlayerControl = 'previous' | 'next'
 
 export interface MusicBarApi {
+    /** Which platform this is; Linux uses Ctrl for ⌘, and a browser extension for AppleScript. */
+    platform: 'darwin' | 'linux'
+    /** Wayland, where the launcher's key is bound in the compositor (to `music-bar --toggle`). */
+    wayland: boolean
     hide(): void
     onShown(listener: () => void): () => void
     onHidden(listener: () => void): () => void
@@ -188,7 +267,7 @@ export interface MusicBarApi {
     setPlaying(source: TrackSource, playing: boolean): Promise<void>
     /** Off restores the repeat mode that was on before looping started. */
     setLoop(source: TrackSource, enabled: boolean): Promise<void>
-    loadTab(source: TrackSource): Promise<void>
+    loadTab(source: TabSource): Promise<void>
     fetchArtwork(url: string): Promise<string>
     /** Opens YouTube Music in a background tab; resolves once it's running. */
     openYouTubeMusic(browser: BrowserName): Promise<void>
@@ -208,7 +287,17 @@ export interface MusicBarApi {
     checkBrowser(browser: BrowserName): Promise<BrowserSetupState>
     openBrowser(browser: BrowserName): Promise<void>
     openAutomationSettings(): Promise<void>
+    getExtensionFolder(): Promise<string>
+    showExtensionFolder(): Promise<void>
+    openExtensionsPage(browser: BrowserName): Promise<void>
     finishSetup(): void
+    getSpotify(): Promise<SpotifyInfo>
+    setSpotifyEnabled(enabled: boolean): Promise<void>
+    openSpotify(): Promise<void>
+    /** Saves the Client ID and opens Spotify's sign-in page; resolves once signed in. */
+    connectSpotify(clientId: string): Promise<void>
+    disconnectSpotify(): Promise<void>
+    openSpotifyDashboard(): Promise<void>
     /** The version downloaded and waiting for a restart, or null. */
     getUpdate(): Promise<string | null>
     installUpdate(): void

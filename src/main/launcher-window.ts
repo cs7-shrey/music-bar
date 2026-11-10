@@ -2,6 +2,14 @@ import { app, BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { IPC } from '../shared/ipc'
 import { markAsSystemDialog } from './system-dialog'
+import { sessionArguments } from './session'
+
+/**
+ * The launcher's window title on Linux, fixed (the page doesn't set it), so
+ * tiling window managers can be told to float it: Hyprland and Sway tile
+ * every window unless a rule says otherwise (see the README).
+ */
+export const LAUNCHER_TITLE = 'Music Bar Launcher'
 
 const WIDTH = 750
 const HEIGHT = 475
@@ -27,8 +35,11 @@ export function createLauncherWindow(): BrowserWindow {
         fullscreenable: false,
         skipTaskbar: true,
         // NSPanel so the launcher can float over full-screen apps without
-        // pulling the user to another Space.
-        type: 'panel',
+        // pulling the user to another Space. Linux gets an ordinary window:
+        // its other types change how window managers focus it, each its
+        // own way.
+        ...(process.platform === 'darwin' && { type: 'panel' }),
+        title: LAUNCHER_TITLE,
         // Borderless, not just frameless: Electron gives a frameless window a
         // hidden title bar and buttons for its rounded corners. Window
         // managers count a window with a close button as theirs to manage
@@ -42,6 +53,7 @@ export function createLauncherWindow(): BrowserWindow {
             preload: join(__dirname, 'preload.js'),
             contextIsolation: true,
             sandbox: true,
+            additionalArguments: sessionArguments(),
         },
     })
 
@@ -57,6 +69,8 @@ export function createLauncherWindow(): BrowserWindow {
     })
 
     window.on('hide', () => window?.webContents.send(IPC.launcherHidden))
+    // Keeps LAUNCHER_TITLE rather than the page's <title>.
+    window.on('page-title-updated', (event) => event.preventDefault())
 
     window.webContents.once('did-finish-load', () => {
         loaded = true

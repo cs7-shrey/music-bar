@@ -1,5 +1,5 @@
 import type { SearchResults, SearchSong } from '../shared/ipc'
-import { defaultTab, evaluateAsyncInTab } from './youtube-music'
+import { defaultTab, evaluateAsyncInTab, tabsUnavailableMessage } from './youtube-music'
 import { describe, logger } from './log'
 
 // Search goes through YouTube Music's own internal API (the endpoints its
@@ -53,7 +53,7 @@ function innerTubeRequest(endpoint: string, payload: Record<string, string>): st
 
 async function requestInTab(endpoint: string, payload: Record<string, string>): Promise<unknown> {
     const tab = await defaultTab()
-    if (!tab) throw new Error('Open YouTube Music in Brave, Chrome or Helium')
+    if (!tab) throw new Error(tabsUnavailableMessage())
     return JSON.parse(await evaluateAsyncInTab(tab, innerTubeRequest(endpoint, payload)))
 }
 
@@ -72,6 +72,7 @@ export async function suggest(query: string): Promise<SearchResults> {
         )
         return {
             status: 'ok',
+            service: 'youtube-music',
             suggestions: suggestions.slice(0, MAX_SUGGESTIONS),
             songs: toSongs(songs.map(parseListItem)),
         }
@@ -94,13 +95,13 @@ export async function search(query: string): Promise<SearchResults> {
                 item.musicResponsiveListItemRenderer ? parseListItem(item.musicResponsiveListItemRenderer) : null,
             )
         })
-        return { status: 'ok', suggestions: [], songs: toSongs(candidates) }
+        return { status: 'ok', service: 'youtube-music', suggestions: [], songs: toSongs(candidates) }
     })
 }
 
 async function run(query: string, perform: (query: string) => Promise<SearchResults>): Promise<SearchResults> {
     const trimmed = typeof query === 'string' ? query.trim() : ''
-    if (!trimmed) return { status: 'ok', suggestions: [], songs: [] }
+    if (!trimmed) return { status: 'ok', service: 'youtube-music', suggestions: [], songs: [] }
     try {
         return await perform(trimmed)
     } catch (error) {
@@ -115,8 +116,8 @@ function toSongs(candidates: (SearchSong | null)[]): SearchSong[] {
     const seen = new Set<string>()
     const songs: SearchSong[] = []
     for (const song of candidates) {
-        if (!song || seen.has(song.videoId)) continue
-        seen.add(song.videoId)
+        if (!song || seen.has(song.id)) continue
+        seen.add(song.id)
         songs.push(song)
         if (songs.length === MAX_SONGS) break
     }
@@ -132,7 +133,8 @@ function parseListItem(item: ListItemRenderer): SearchSong | null {
     if (!videoId || !kind) return null
     const columns = item.flexColumns?.map((column) => column.musicResponsiveListItemFlexColumnRenderer?.text) ?? []
     return {
-        videoId,
+        service: 'youtube-music',
+        id: videoId,
         title: joinRuns(columns[0]),
         artist: artistFromSubtitle(columns[1]),
         kind,
@@ -145,7 +147,8 @@ function parseCard(card: CardShelfRenderer): SearchSong | null {
     const kind = songKind(endpoint)
     if (!endpoint?.videoId || !kind) return null
     return {
-        videoId: endpoint.videoId,
+        service: 'youtube-music',
+        id: endpoint.videoId,
         title: joinRuns(card.title),
         artist: artistFromSubtitle(card.subtitle),
         kind,
