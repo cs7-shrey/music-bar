@@ -48,6 +48,8 @@ sections.push(`## Install
 2. Drag **Music Bar** onto **Applications**.
 3. Open Music Bar from Applications.
 
-Needs a Mac with Apple silicon.`)
+Needs a Mac with Apple silicon.
+
+**Debian and Ubuntu:** download the \`.deb\` below, then \`sudo apt install ./music-bar_…_amd64.deb\`. **NixOS:** \`nix run github:cs7-shrey/music-bar\`. Then see [Linux](https://github.com/cs7-shrey/music-bar#linux) for setting up the browser extension.`)
 
 console.log(sections.join('\n\n'))

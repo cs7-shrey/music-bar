@@ -96,3 +96,33 @@ jobs:
                   cp "out/make/zip/darwin/arm64/Music Bar-darwin-arm64-$version.zip" "$zip"
                   node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
                   gh release create "$GITHUB_REF_NAME" "$dmg" "$zip" --title "Music Bar $version" --notes-file notes.md
+
+    # The .deb, added to the release once the macOS job has published it.
+    linux:
+        needs: release
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: pnpm
+
+            - run: pnpm install --frozen-lockfile
+
+            - run: pnpm typecheck
+
+            # dpkg is there already; the deb maker needs fakeroot too.
+            - run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+            - run: pnpm make
+
+            - name: Attach the .deb to the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  version=${GITHUB_REF_NAME#v}
+                  gh release upload "$GITHUB_REF_NAME" "out/make/deb/x64/music-bar_${version}_amd64.deb"
