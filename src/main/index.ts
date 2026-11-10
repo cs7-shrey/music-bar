@@ -1,5 +1,5 @@
 import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type NativeImage } from 'electron'
-import { IPC, type BrowserName, type PlayerControl, type SettingsSection, type TrackSource } from '../shared/ipc'
+import { IPC, type BrowserName, type PlayerControl, type Service, type SettingsSection, type TabSource, type TrackSource } from '../shared/ipc'
 import {
     createLauncherWindow,
     focusLauncher,
@@ -10,7 +10,7 @@ import {
     toggleLauncher,
 } from './launcher-window'
 import * as youtubeMusic from './youtube-music'
-import * as youtubeMusicSearch from './youtube-music-search'
+import * as players from './players'
 import { fetchArtwork } from './artwork'
 import { activateApp, frontmostApp } from './frontmost-app'
 import { getSettings, updateSettings } from './settings'
@@ -188,6 +188,7 @@ app.whenReady().then(() => {
         openAtLogin: isOpenAtLogin(),
         installed: youtubeMusic.installedBrowsers(),
         chosen: getSettings().browsers,
+        spotify: getSettings().spotify,
     })
     // Replaces Electron's default menu, whose Hide item owns ⌘H before the
     // launcher sees it (⌘H is "previous"). The Edit menu keeps copy/paste
@@ -230,18 +231,18 @@ app.whenReady().then(() => {
     else if (app.isPackaged && !openedAtLogin) showLauncher()
 
     ipcMain.on(IPC.launcherHide, () => hideLauncher())
-    ipcMain.handle(IPC.nowPlayingGet, () => youtubeMusic.getNowPlaying())
-    ipcMain.handle(IPC.nowPlayingGetFollowed, () => youtubeMusic.getFollowedNowPlaying())
+    ipcMain.handle(IPC.nowPlayingGet, () => players.getNowPlaying())
+    ipcMain.handle(IPC.nowPlayingGetFollowed, () => players.getFollowedNowPlaying())
     // Reads poll every second or so and aren't logged per call;
     // youtube-music.ts logs when what they find changes.
     handleAction(IPC.nowPlayingControl, (source: TrackSource, control: PlayerControl) =>
-        youtubeMusic.control(source, control),
+        players.control(source, control),
     )
     handleAction(IPC.nowPlayingSetPlaying, (source: TrackSource, playing: boolean) =>
-        youtubeMusic.setPlaying(source, playing),
+        players.setPlaying(source, playing),
     )
-    handleAction(IPC.nowPlayingLoadTab, (source: TrackSource) => youtubeMusic.loadTab(source))
-    handleAction(IPC.nowPlayingSetLoop, (source: TrackSource, enabled: boolean) => youtubeMusic.setLoop(source, enabled))
+    handleAction(IPC.nowPlayingLoadTab, (source: TabSource) => youtubeMusic.loadTab(source))
+    handleAction(IPC.nowPlayingSetLoop, (source: TrackSource, enabled: boolean) => players.setLoop(source, enabled))
     handleAction(IPC.openYouTubeMusic, async (browser: BrowserName) => {
         // The browser comes forward when the tab is made. The app the user
         // was in goes back in front right after, and the launcher takes the
@@ -267,6 +268,8 @@ app.whenReady().then(() => {
         ),
         chosen: getSettings().browsers,
         awaitingShortcut: getSettings().awaitingShortcut,
+        spotifyInstalled: players.spotifyInstalled(),
+        spotify: getSettings().spotify,
     }))
     handleAction(IPC.setupSetBrowsers, (browsers: BrowserName[]) => updateSettings({ browsers }))
     ipcMain.handle(IPC.setupCheck, (_event, browser: BrowserName) => youtubeMusic.checkBrowser(browser))
@@ -283,18 +286,34 @@ app.whenReady().then(() => {
     handleAction(IPC.setupOpenExtensionsPage, (browser: BrowserName) => openExtensionsPage(browser))
     ipcMain.on(IPC.setupFinish, () => {
         updateSettings({ awaitingShortcut: true })
-        log.info('setup finished', getSettings())
+        // Not the whole settings: they hold the Spotify sign-in.
+        const { browsers, spotify } = getSettings()
+        log.info('setup finished', { browsers, spotify })
     })
     ipcMain.handle(IPC.updateGet, () => updateReady())
     ipcMain.on(IPC.updateInstall, installUpdate)
     ipcMain.handle(IPC.artworkFetch, (_event, url: string) => fetchArtwork(url))
-    ipcMain.handle(IPC.searchSuggest, (_event, query: string) => youtubeMusicSearch.suggest(query))
-    ipcMain.handle(IPC.searchRun, (_event, query: string) => youtubeMusicSearch.search(query))
-    handleAction(IPC.playNow, (videoId: string) => youtubeMusic.playNow(videoId))
-    handleAction(IPC.playNext, (videoId: string) => youtubeMusic.playNext(videoId))
-    handleAction(IPC.showTab, (source: TrackSource) => youtubeMusic.showTab(source))
-    handleAction(IPC.startRadio, (source: TrackSource) => youtubeMusic.startRadio(source))
-    handleAction(IPC.startRadioFromSong, (videoId: string) => youtubeMusic.startRadioFromSong(videoId))
+    ipcMain.handle(IPC.searchSuggest, (_event, query: string) => players.suggest(query))
+    ipcMain.handle(IPC.searchRun, (_event, query: string) => players.search(query))
+    handleAction(IPC.playNow, (service: Service, id: string) => players.playNow(service, id))
+    handleAction(IPC.playNext, (service: Service, id: string) => players.playNext(service, id))
+    handleAction(IPC.showTab, (source: TrackSource) => players.showTab(source))
+    handleAction(IPC.startRadio, (source: TrackSource) => players.startRadio(source))
+    handleAction(IPC.startRadioFromSong, (service: Service, id: string) => players.startRadioFromSong(service, id))
+    ipcMain.handle(IPC.spotifyGet, () => players.spotifyInfo())
+    handleAction(IPC.spotifySetEnabled, (enabled: boolean) => players.setSpotifyEnabled(enabled))
+    handleAction(IPC.spotifyOpen, () => players.openSpotify())
+    // The Client ID isn't logged: handleAction logs arguments.
+    ipcMain.handle(IPC.spotifyConnect, async (_event, clientId: string) => {
+        try {
+            await players.connectSpotify(clientId)
+        } catch (error) {
+            log.warn(`spotify sign-in failed: ${describe(error)}`)
+            throw error
+        }
+    })
+    handleAction(IPC.spotifyDisconnect, () => players.disconnectSpotify())
+    handleAction(IPC.spotifyOpenDashboard, () => shell.openExternal('https://developer.spotify.com/dashboard'))
 
     if (isWayland) {
         log.info(`Wayland: the launcher opens with \`${TOGGLE_FLAG}\`, from a key bound in the compositor`)

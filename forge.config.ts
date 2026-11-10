@@ -63,7 +63,7 @@ const config: ForgeConfig = {
             // Menu-bar style app: no Dock icon, no app switcher entry.
             LSUIElement: true,
             NSAppleEventsUsageDescription:
-                'Music Bar controls YouTube Music in your browser to show and change what is playing.',
+                'Music Bar controls YouTube Music in your browser, and the Spotify app, to show and change what is playing.',
         },
         // Hardened runtime on every binary (osx-sign's default), koffi's
         // included. The app itself gets entitlements.plist; helpers keep

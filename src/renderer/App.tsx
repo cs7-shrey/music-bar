@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Command } from 'cmdk'
 import { ExternalLink, Globe, MousePointerClick, Pause, Play, Radio, RefreshCw, Repeat1, Search, Settings } from 'lucide-react'
-import type { BrowserName, BrowserState, BrowserStatus, PlayerControl, SearchSong } from '../shared/ipc'
-import { BROWSER_NAMES, NowPlaying, useArtwork, useNowPlaying, WAITING } from './now-playing'
+import { isSpotify, type BrowserName, type BrowserState, type BrowserStatus, type PlayerControl, type SearchSong } from '../shared/ipc'
+import {
+    BROWSER_NAMES,
+    canLoop,
+    canStartRadio,
+    errorMessage,
+    NowPlaying,
+    playerName,
+    useArtwork,
+    useNowPlaying,
+    WAITING,
+} from './now-playing'
 import { ListNote, SearchRow, SongRow, searchValue, songValue, useFullSearch, useSuggestions } from './search'
 import markUrl from '../../assets/mark.svg'
 import { hasModifier, isMac, keys, SCRIPTING_SETUP } from './platform'
@@ -137,8 +147,9 @@ export default function App() {
         try {
             await window.musicBar.playNext(song)
             setNotice(`“${song.title}” will play next`)
-        } catch {
-            setNotice(`Couldn't queue “${song.title}”`)
+        } catch (error) {
+            // Spotify's reasons are worth reading: no account connected, not Premium.
+            setNotice(song.service === 'spotify' ? errorMessage(error) : `Couldn't queue “${song.title}”`)
         }
     }
 
@@ -153,15 +164,16 @@ export default function App() {
     const startRadio = () => {
         // Waits for the state to catch up; nowPlaying runs it then.
         if (nowPlaying.syncing) return nowPlaying.startRadio()
-        if (!track || isAd) return
+        if (!canStartRadio(track)) return
         nowPlaying.startRadio()
-        setNotice(`Starting a radio from “${track.title}”`)
+        setNotice(`Starting a radio from “${track!.title}”`)
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
         // ⌘↵ on a song starts a radio from it, then returns to the card.
         if (event.key === 'Enter' && hasModifier(event) && selectedSong) {
             event.preventDefault()
+            if (selectedSong.service === 'spotify') return setNotice('Radio is only for YouTube Music')
             nowPlaying.startRadioFrom(selectedSong)
             reset()
             return
@@ -246,7 +258,7 @@ export default function App() {
                 value={PLAY_PAUSE_COMMAND}
                 icon={<MousePointerClick strokeWidth={2.25} />}
                 title="Show Tab"
-                subtitle={`Click play there once: ${BROWSER_NAMES[track.source.browser]} won't start sound until you do`}
+                subtitle={`Click play there once: ${playerName(track.source)} won't start sound until you do`}
                 onSelect={nowPlaying.showTab}
             />
         ) : (
@@ -287,14 +299,16 @@ export default function App() {
                 subtitle={
                     isAd
                         ? 'Not available during ads'
-                        : track
-                          ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
-                          : 'Nothing is playing'
+                        : track && !canLoop(track)
+                          ? "Spotify can't loop one song from Music Bar on macOS"
+                          : track
+                            ? `${isLooping ? 'Looping' : 'Repeat'} “${track.title}”`
+                            : 'Nothing is playing'
                 }
                 shortcut={keys('⌘O')}
                 // Dimmed rather than skipped: a missing row would push the
                 // selection onto a placeholder while the track loads.
-                muted={(!track && !nowPlaying.syncing) || isAd}
+                muted={(!track && !nowPlaying.syncing) || (!!track && !canLoop(track))}
                 waiting={nowPlaying.queued.get('loop') === 'list'}
                 onSelect={() => nowPlaying.toggleLoop('list')}
             />
@@ -303,10 +317,16 @@ export default function App() {
                 icon={<Radio strokeWidth={2.25} />}
                 title="Start Radio"
                 subtitle={
-                    isAd ? 'Not available during ads' : track ? `A mix based on “${track.title}”` : 'Nothing is playing'
+                    isAd
+                        ? 'Not available during ads'
+                        : track && isSpotify(track.source)
+                          ? 'Only for YouTube Music'
+                          : track
+                            ? `A mix based on “${track.title}”`
+                            : 'Nothing is playing'
                 }
                 shortcut={keys('⌘R')}
-                muted={(!track && !nowPlaying.syncing) || isAd}
+                muted={(!track && !nowPlaying.syncing) || (!!track && !canStartRadio(track))}
                 waiting={nowPlaying.queued.has('radio')}
                 onSelect={startRadio}
             />
@@ -463,9 +483,9 @@ export default function App() {
                         )}
                         {live.results?.status === 'error' && <ListNote>{live.results.message}</ListNote>}
                         {liveResults && liveResults.songs.length > 0 && (
-                            <Command.Group heading="Songs">
+                            <Command.Group heading={liveResults.service === 'spotify' ? 'Songs on Spotify' : 'Songs'}>
                                 {liveResults.songs.map((song) => (
-                                    <SongRow key={song.videoId} song={song} onSelect={() => play(song)} />
+                                    <SongRow key={songValue(song)} song={song} onSelect={() => play(song)} />
                                 ))}
                             </Command.Group>
                         )}
@@ -484,7 +504,7 @@ export default function App() {
                         )}
                         {full.results?.status === 'ok' &&
                             full.results.songs.map((song) => (
-                                <SongRow key={song.videoId} song={song} onSelect={() => play(song)} />
+                                <SongRow key={songValue(song)} song={song} onSelect={() => play(song)} />
                             ))}
                     </Command.Group>
                 )}
@@ -504,7 +524,7 @@ export default function App() {
                     ) : track?.playBlocked ? (
                         <span className="truncate text-white">
                             <span className="mr-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle" />
-                            {BROWSER_NAMES[track.source.browser]} needs one click in the tab to play
+                            {playerName(track.source)} needs one click in the tab to play
                         </span>
                     ) : footerProblem ? (
                         <span className="truncate text-white">
@@ -521,7 +541,7 @@ export default function App() {
                         <>
                             <Hint keys="↵" label="Play" />
                             <Hint keys={keys('⇧↵')} label="Play next" />
-                            <Hint keys={keys('⌘↵')} label="Radio" />
+                            {selectedSong.service !== 'spotify' && <Hint keys={keys('⌘↵')} label="Radio" />}
                         </>
                     ) : (
                         <Hint keys="↵" label={selected.startsWith('search:') ? 'Search' : 'Select'} />

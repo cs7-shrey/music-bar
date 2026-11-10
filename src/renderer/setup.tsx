@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Check } from 'lucide-react'
-import type { BrowserName, BrowserSetupState, InstalledBrowser } from '../shared/ipc'
+import type { BrowserName, BrowserSetupState, InstalledBrowser, SpotifyState } from '../shared/ipc'
 import { BROWSER_NAMES } from './now-playing'
 import markUrl from '../../assets/mark.svg'
+import { SpotifyAppHint, SpotifyIcon, SpotifyStatusPill, useSpotify } from './spotify-settings'
 import { isMac, isWayland, keyCaps, keys, SUPPORTED_BROWSERS, TOGGLE_COMMAND, TRAY } from './platform'
 
 // The setup window: pick the browsers Music Bar may use, then walk each one
@@ -41,8 +42,13 @@ export default function Setup() {
     const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null)
     // Checks run only on the connect step; choosing a browser asks nothing yet.
     const checks = useBrowserChecks(step === 'connect' ? chosen : [])
-    // Music Bar works once one browser is ready; the rest can wait.
-    const anyReady = chosen.some((browser) => isReady(checks[browser]?.state ?? null))
+    // Spotify is offered beside the browsers when it's installed.
+    const [spotifyInstalled, setSpotifyInstalled] = useState(false)
+    const [spotifyChosen, setSpotifyChosen] = useState(false)
+    const [spotifyState, setSpotifyState] = useState<SpotifyState | null>(null)
+    // Music Bar works once one browser (or Spotify) is ready; the rest can wait.
+    const anyReady =
+        chosen.some((browser) => isReady(checks[browser]?.state ?? null)) || (spotifyChosen && spotifyState === 'ready')
 
     useEffect(() => {
         void window.musicBar.getSetup().then((info) => {
@@ -50,6 +56,8 @@ export default function Setup() {
             const available = info.installed.map((item) => item.browser)
             // A single browser needs no choosing.
             setChosen(info.chosen?.filter((b) => available.includes(b)) ?? (available.length === 1 ? available : []))
+            setSpotifyInstalled(info.spotifyInstalled)
+            setSpotifyChosen(info.spotify)
             if (info.awaitingShortcut) setStep('ready')
         })
         void window.musicBar.getOpenAtLogin().then((info) => setOpenAtLogin(info.available ? true : null))
@@ -62,6 +70,7 @@ export default function Setup() {
         // Kept in the order they're listed, not the order they were clicked.
         const ordered = (installed ?? []).map((item) => item.browser).filter((b) => chosen.includes(b))
         await window.musicBar.setBrowsers(ordered)
+        await window.musicBar.setSpotifyEnabled(spotifyChosen)
         if (openAtLogin !== null) await window.musicBar.setOpenAtLogin(openAtLogin)
         setChosen(ordered)
         setStep('connect')
@@ -85,14 +94,16 @@ export default function Setup() {
                             {step === 'choose'
                                 ? 'Welcome to Music Bar'
                                 : step === 'connect'
-                                  ? 'Connect your browsers'
+                                  ? spotifyChosen && chosen.length === 0
+                                      ? 'Connect Spotify'
+                                      : 'Connect your browsers'
                                   : 'You’re all set'}
                         </h1>
                         <p className="text-sm font-medium text-subdued">
                             {step === 'choose' ? (
                                 <>
-                                    Control YouTube Music from anywhere with <LauncherKeys />. Choose the browsers you play
-                                    it in.
+                                    Control {spotifyInstalled ? 'YouTube Music and Spotify' : 'YouTube Music'} from anywhere
+                                    with <LauncherKeys />. Choose where you play music.
                                 </>
                             ) : step === 'connect' ? (
                                 'Music Bar controls YouTube Music through your browser. Each one needs a one-time setup.'
@@ -111,7 +122,12 @@ export default function Setup() {
 
                 {step === 'choose' ? (
                     <>
-                        <ChooseBrowsers installed={installed} chosen={chosen} onToggle={toggle} />
+                        <ChooseBrowsers
+                            installed={installed}
+                            chosen={chosen}
+                            onToggle={toggle}
+                            spotify={spotifyInstalled ? { on: spotifyChosen, toggle: () => setSpotifyChosen(!spotifyChosen) } : null}
+                        />
                         {openAtLogin !== null && !!installed?.length && (
                             <div className="mt-4 flex shrink-0 items-center gap-4 rounded-xl bg-elevated px-4 py-3">
                                 <div className="flex flex-1 flex-col gap-0.5">
@@ -129,7 +145,12 @@ export default function Setup() {
                         )}
                     </>
                 ) : step === 'connect' ? (
-                    <ConnectBrowsers browsers={chosen} icons={installed ?? []} checks={checks} />
+                    <ConnectBrowsers
+                        browsers={chosen}
+                        icons={installed ?? []}
+                        checks={checks}
+                        spotify={spotifyChosen ? <SpotifyCard onState={setSpotifyState} /> : null}
+                    />
                 ) : (
                     <ShortcutKeys />
                 )}
@@ -138,7 +159,7 @@ export default function Setup() {
                     {step === 'choose' ? (
                         <>
                             <span className="text-xs font-medium text-faint">You can change this later from the {TRAY}.</span>
-                            <PrimaryButton disabled={chosen.length === 0} onClick={() => void next()}>
+                            <PrimaryButton disabled={chosen.length === 0 && !spotifyChosen} onClick={() => void next()}>
                                 Continue
                             </PrimaryButton>
                         </>
@@ -188,13 +209,16 @@ function ChooseBrowsers({
     installed,
     chosen,
     onToggle,
+    spotify,
 }: {
     installed: InstalledBrowser[] | null
     chosen: BrowserName[]
     onToggle: (browser: BrowserName) => void
+    /** The Spotify app, when it's installed. */
+    spotify: { on: boolean; toggle: () => void } | null
 }) {
     if (installed === null) return <div className="flex-1" />
-    if (installed.length === 0) {
+    if (installed.length === 0 && !spotify) {
         return (
             <p className="mt-8 flex-1 text-sm font-medium text-subdued">
                 Music Bar works with {SUPPORTED_BROWSERS}. Install one of them, then open Music Bar again.
@@ -206,28 +230,63 @@ function ChooseBrowsers({
             {installed.map(({ browser, icon }) => {
                 const on = chosen.includes(browser)
                 return (
-                    <button
-                        key={browser}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => onToggle(browser)}
-                        className={`flex h-16 shrink-0 items-center gap-4 rounded-xl px-4 text-left transition focus-visible:outline-2 focus-visible:outline-white ${
-                            on ? 'bg-highlight ring-1 ring-white/15' : 'bg-elevated hover:bg-highlight'
-                        }`}
-                    >
-                        <BrowserIcon icon={icon} />
-                        <span className="flex-1 text-[15px] font-bold">{BROWSER_NAMES[browser]}</span>
-                        <span
-                            className={`flex size-6 items-center justify-center rounded-full transition ${
-                                on ? 'bg-accent text-white' : 'ring-2 ring-white/25 ring-inset'
-                            }`}
-                        >
-                            {on && <Check className="size-3.5" strokeWidth={3.5} />}
-                        </span>
-                    </button>
+                    <Choice key={browser} on={on} onToggle={() => onToggle(browser)} icon={<BrowserIcon icon={icon} />}>
+                        {BROWSER_NAMES[browser]}
+                    </Choice>
                 )
             })}
+            {spotify && (
+                <Choice on={spotify.on} onToggle={spotify.toggle} icon={<SpotifyIcon />}>
+                    Spotify
+                </Choice>
+            )}
         </div>
+    )
+}
+
+function Choice({ on, onToggle, icon, children }: { on: boolean; onToggle: () => void; icon: ReactNode; children: ReactNode }) {
+    return (
+        <button
+            type="button"
+            aria-pressed={on}
+            onClick={onToggle}
+            className={`flex h-16 shrink-0 items-center gap-4 rounded-xl px-4 text-left transition focus-visible:outline-2 focus-visible:outline-white ${
+                on ? 'bg-highlight ring-1 ring-white/15' : 'bg-elevated hover:bg-highlight'
+            }`}
+        >
+            {icon}
+            <span className="flex-1 text-[15px] font-bold">{children}</span>
+            <span
+                className={`flex size-6 items-center justify-center rounded-full transition ${
+                    on ? 'bg-accent text-white' : 'ring-2 ring-white/25 ring-inset'
+                }`}
+            >
+                {on && <Check className="size-3.5" strokeWidth={3.5} />}
+            </span>
+        </button>
+    )
+}
+
+/** Spotify on the connect step: open it (and on macOS, allow Automation for it). */
+function SpotifyCard({ onState }: { onState: (state: SpotifyState) => void }) {
+    const [info] = useSpotify()
+    useEffect(() => {
+        if (info) onState(info.state)
+    }, [info?.state])
+    return (
+        <section className="flex shrink-0 flex-col gap-3 rounded-xl bg-elevated p-4">
+            <div className="flex items-center gap-3">
+                <SpotifyIcon />
+                <span className="flex-1 text-[15px] font-bold">Spotify</span>
+                {info && <SpotifyStatusPill state={info.state} />}
+            </div>
+            {info && <SpotifyAppHint state={info.state} />}
+            {info?.state === 'ready' && (
+                <p className="pl-12 text-[13px] font-medium text-subdued">
+                    To search Spotify from Music Bar, connect your account later in Settings → Spotify.
+                </p>
+            )}
+        </section>
     )
 }
 
@@ -298,10 +357,12 @@ function ConnectBrowsers({
     browsers,
     icons,
     checks,
+    spotify,
 }: {
     browsers: BrowserName[]
     icons: InstalledBrowser[]
     checks: Record<string, BrowserCheck>
+    spotify: ReactNode
 }) {
     return (
         <div className="mt-8 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
@@ -313,6 +374,7 @@ function ConnectBrowsers({
                     check={checks[browser] ?? { state: null, since: null }}
                 />
             ))}
+            {spotify}
         </div>
     )
 }
@@ -364,7 +426,7 @@ function BindCommand() {
     )
 }
 
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
     const [copied, setCopied] = useState(false)
     useEffect(() => {
         if (!copied) return
@@ -558,7 +620,7 @@ export function PrimaryButton({ disabled, onClick, children }: { disabled?: bool
     )
 }
 
-function SmallButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+export function SmallButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
     return (
         <button
             type="button"

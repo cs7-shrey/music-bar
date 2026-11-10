@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { nativeImage } from 'electron'
-import type { BrowserName, BrowserStatus, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserStatus, TabSource } from '../shared/ipc'
 import { logger } from './log'
 import { TransportError, type BrowserRead, type RawTab, type TabTransport } from './tab-transport'
 
@@ -103,7 +103,7 @@ const indexOf = (tabId: string) => `
         if (id of t as text) is "${tabId}" then exit repeat
     end repeat`
 
-function tellWindow(source: TrackSource, body: string): Promise<string> {
+function tellWindow(source: TabSource, body: string): Promise<string> {
     return runAppleScript(`
 tell ${appRef(source.browser)}
     set w to window id ${source.windowId}

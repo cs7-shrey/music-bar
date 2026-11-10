@@ -1,4 +1,4 @@
-import type { BrowserName, BrowserStatus, Track, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserStatus, TabTrack, TabSource } from '../shared/ipc'
 
 // How youtube-music.ts reaches browser tabs. Each platform has its own way
 // in: AppleScript's `execute javascript` on macOS (mac-transport.ts), Music
@@ -41,7 +41,7 @@ export interface RawRead {
  * save memory): its scripts never answer.
  */
 export type TabResult =
-    | { source: TrackSource; track: Track | null; loaded: boolean; busy?: boolean }
+    | { source: TabSource; track: TabTrack | null; loaded: boolean; busy?: boolean }
     | { error: string; code: ErrorCode }
 
 /** One browser's read: whether it's open, and what its YT Music tabs returned. */
@@ -75,13 +75,13 @@ export interface TabTransport {
         timeoutMs?: number,
     ): Promise<RawRead>
     /** Runs JavaScript in one tab and returns its value as text. */
-    executeInTab(source: TrackSource, js: string, timeoutSeconds: number): Promise<string>
+    executeInTab(source: TabSource, js: string, timeoutSeconds: number): Promise<string>
     /** Shows a tab in its window; returns the id of the tab shown before, as text. */
-    activateTab(source: TrackSource): Promise<string>
+    activateTab(source: TabSource): Promise<string>
     /** Shows `previousTabId` again, if `source` is still the tab in front. */
-    restoreTab(source: TrackSource, previousTabId: string): Promise<void>
+    restoreTab(source: TabSource, previousTabId: string): Promise<void>
     /** Brings a tab, its window and its browser to the front. */
-    showTab(source: TrackSource): Promise<void>
+    showTab(source: TabSource): Promise<void>
     /**
      * Opens `url` in a new tab of the browser's front window, without
      * switching to it ('background'), or in a new window if there's none

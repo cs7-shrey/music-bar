@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { BrowserName, BrowserSetupState, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserSetupState, NowPlaying, PlayerControl, TabTrack, TabSource } from '../shared/ipc'
 import { getSettings } from './settings'
 import { describe, logger } from './log'
 import { linuxTransport } from './linux-transport'
@@ -138,33 +138,33 @@ const TAB_ANSWER_SECONDS = 1
 // doesn't spend a second on every inactive tab every time.
 const INACTIVE_RETRY_MS = 30_000
 const inactiveUntil = new Map<string, number>()
-const tabKey = (source: TrackSource) => `${source.browser}:${source.windowId}:${source.tabId}`
+const tabKey = (source: TabSource) => `${source.browser}:${source.windowId}:${source.tabId}`
 // A tab that answered this recently and then times out is busy (loading a
 // new song can block its page for over a second), not unloaded: browsers
 // don't unload a tab that was just playing or being controlled.
 const BUSY_GRACE_MS = 60_000
 const lastAnswered = new Map<string, number>()
-const recentlyAnswered = (source: TrackSource) => Date.now() - (lastAnswered.get(tabKey(source)) ?? 0) < BUSY_GRACE_MS
+const recentlyAnswered = (source: TabSource) => Date.now() - (lastAnswered.get(tabKey(source)) ?? 0) < BUSY_GRACE_MS
 
 // The tab Music Bar follows: the last one seen playing or controlled. Without
 // this, a pause or the gap between songs hands the card to whichever other
 // YT Music tab happens to have a paused track loaded.
-let followed: TrackSource | null = null
+let followed: TabSource | null = null
 // The browser of the last followed tab; listed first when offering to open one.
 let lastUsedBrowser: BrowserName | null = null
 // The followed tab's last track, shown while it briefly has no metadata
 // between songs.
-let followedTrack: Track | null = null
+let followedTrack: TabTrack | null = null
 
 // Every YT Music tab seen by the last read; searches fall back to these when
 // nothing is followed yet.
-let knownTabs: TrackSource[] = []
+let knownTabs: TabSource[] = []
 
-function isSameTab(a: TrackSource, b: TrackSource): boolean {
+function isSameTab(a: TabSource, b: TabSource): boolean {
     return a.browser === b.browser && a.windowId === b.windowId && a.tabId === b.tabId
 }
 
-function follow(track: Track): Track {
+function follow(track: TabTrack): TabTrack {
     followed = track.source
     lastUsedBrowser = track.source.browser
     followedTrack = track
@@ -189,7 +189,7 @@ async function readBrowser(browser: BrowserName, timeoutMs?: number): Promise<Br
 
     const results = raw.tabs.map((tab: RawTab): TabResult => {
         if (tab.kind === 'error') return { code: tab.code, error: tab.message }
-        const source: TrackSource = { browser, windowId: tab.windowId, tabId: tab.tabId }
+        const source: TabSource = { browser, windowId: tab.windowId, tabId: tab.tabId }
         if (tab.kind === 'skipped') return { source, track: null, loaded: false }
         if (tab.kind === 'unloaded') {
             // Busy: counts as loaded with nothing read, so the card keeps
@@ -201,7 +201,7 @@ async function readBrowser(browser: BrowserName, timeoutMs?: number): Promise<Br
         inactiveUntil.delete(tabKey(source))
         lastAnswered.set(tabKey(source), Date.now())
         if (!tab.json) return { source, track: null, loaded: true }
-        const track: Track = { ...JSON.parse(tab.json), source }
+        const track: TabTrack = { ...JSON.parse(tab.json), source }
         return { source, track, loaded: true }
     })
     return { browser, running: raw.running, results, probe: raw.probe }
@@ -253,7 +253,7 @@ function chooseNowPlaying(results: TabResult[]): NowPlaying {
     knownTabs = [...tabs.filter((tab) => tab.loaded), ...tabs.filter((tab) => !tab.loaded)].map((tab) => tab.source)
     const tracks = tabs.flatMap((tab) => (tab.track ? [tab.track] : []))
     const current = followed
-    const isFollowed = (source: TrackSource) => current !== null && isSameTab(source, current)
+    const isFollowed = (source: TabSource) => current !== null && isSameTab(source, current)
     const followedTab = tabs.find((tab) => isFollowed(tab.source))
     // Tab ids don't survive a browser restart or a closed tab; a followed
     // tab that's gone would leave search and play now aimed at nothing.
@@ -306,7 +306,7 @@ export async function getFollowedNowPlaying(): Promise<NowPlaying | null> {
 }
 
 /** The tab to search and play in: the followed one, else any YT Music tab. */
-export async function defaultTab(): Promise<TrackSource | null> {
+export async function defaultTab(): Promise<TabSource | null> {
     if (!followed && knownTabs.length === 0) await getNowPlaying()
     return followed ?? knownTabs[0] ?? null
 }
@@ -315,7 +315,7 @@ export async function defaultTab(): Promise<TrackSource | null> {
  * Checks a tab from the renderer before it goes anywhere near a script:
  * a browser this platform supports, and whole-number ids.
  */
-function checkSource(source: TrackSource): void {
+function checkSource(source: TabSource): void {
     if (!transport.browsers.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
         throw new Error('Invalid tab')
     }
@@ -328,7 +328,7 @@ export const tabsUnavailableMessage = () => transport.openHint
  * that doesn't answer in time (often one the browser hasn't loaded) fails:
  * with AppleScript's "AppleEvent timed out" error on macOS.
  */
-async function executeInTab(source: TrackSource, js: string, timeoutSeconds = 3): Promise<string> {
+async function executeInTab(source: TabSource, js: string, timeoutSeconds = 3): Promise<string> {
     // The source can come back from the renderer, so it goes through a strict
     // check before it is spliced into a script.
     checkSource(source)
@@ -346,7 +346,7 @@ const ASYNC_POLL_MS = 80
  * to the browser's isolated script world, which persists between calls but
  * is invisible to the page.
  */
-export async function evaluateAsyncInTab(source: TrackSource, body: string, timeoutMs = 8000): Promise<string> {
+export async function evaluateAsyncInTab(source: TabSource, body: string, timeoutMs = 8000): Promise<string> {
     const id = randomUUID()
     await executeInTab(
         source,
@@ -392,7 +392,7 @@ const SHOW_POLL_MS = 100
  * the background.
  */
 async function showTabUntil(
-    source: TrackSource,
+    source: TabSource,
     isReady: () => Promise<boolean>,
     timeoutMs: number,
     failure: string,
@@ -416,7 +416,7 @@ async function showTabUntil(
 // this far apart, means Chromium is holding it.
 const WAKE_RECHECK_MS = 600
 
-async function wakeIfAsleep(source: TrackSource): Promise<void> {
+async function wakeIfAsleep(source: TabSource): Promise<void> {
     const isAsleep = async () => (await executeInTab(source, `String(${IS_ASLEEP_JS})`)) === 'true'
     if (!(await isAsleep())) return
     await new Promise((resolve) => setTimeout(resolve, WAKE_RECHECK_MS))
@@ -431,7 +431,7 @@ async function wakeIfAsleep(source: TrackSource): Promise<void> {
 }
 
 /** Gets the browser to load a tab it restored or discarded without loading. */
-export async function loadTab(source: TrackSource): Promise<void> {
+export async function loadTab(source: TabSource): Promise<void> {
     checkSource(source)
     await enqueue(() =>
         showTabUntil(
@@ -474,7 +474,7 @@ const AUTOPLAY_PROBE = `
     window.__musicBarBlocked = result === 'blocked';
     return result;`
 
-async function isPlaybackBlocked(source: TrackSource): Promise<boolean> {
+async function isPlaybackBlocked(source: TabSource): Promise<boolean> {
     try {
         const blocked = (await evaluateAsyncInTab(source, AUTOPLAY_PROBE, 3000)) === 'blocked'
         if (blocked) log.info('browser blocked playback until the page is clicked', source)
@@ -499,7 +499,7 @@ function enqueue(action: () => Promise<void>): Promise<void> {
  * let play still gets the action, so the song is there to start by hand, but
  * isn't woken: showing it wouldn't help. Reads then report playBlocked.
  */
-async function runInTab(source: TrackSource, js: string, { wake = false } = {}): Promise<void> {
+async function runInTab(source: TabSource, js: string, { wake = false } = {}): Promise<void> {
     // Whatever the user just acted on is the tab to follow.
     if (!followed || !isSameTab(followed, source)) {
         followed = source
@@ -517,19 +517,19 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
  * Brings a tab to the front, browser included, for the user to interact
  * with: the way past a browser that won't let the page play on its own.
  */
-export async function showTab(source: TrackSource): Promise<void> {
+export async function showTab(source: TabSource): Promise<void> {
     checkSource(source)
     await transport.showTab(source)
 }
 
-export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
+export async function control(source: TabSource, action: PlayerControl): Promise<void> {
     if (!(action in CONTROL_SELECTORS)) throw new Error('Invalid player control')
     await runInTab(source, `document.querySelector('ytmusic-player-bar ${CONTROL_SELECTORS[action]}')?.click()`, {
         wake: true,
     })
 }
 
-export async function setPlaying(source: TrackSource, playing: boolean): Promise<void> {
+export async function setPlaying(source: TabSource, playing: boolean): Promise<void> {
     if (typeof playing !== 'boolean') throw new Error('Invalid play request')
     // Sets a state rather than toggling, so a repeated or late request can't
     // flip playback the wrong way. During an ad the player bar's button does
@@ -550,7 +550,7 @@ export async function setPlaying(source: TrackSource, playing: boolean): Promise
     )
 }
 
-export async function setLoop(source: TrackSource, enabled: boolean): Promise<void> {
+export async function setLoop(source: TabSource, enabled: boolean): Promise<void> {
     if (typeof enabled !== 'boolean') throw new Error('Invalid loop request')
     // The repeat button only cycles (off → all → one → off), and the bar's
     // repeat-mode attribute updates synchronously on each click, so click
@@ -579,7 +579,7 @@ export async function setLoop(source: TrackSource, enabled: boolean): Promise<vo
 const VIDEO_ID = /^[\w-]{11}$/
 
 /** The followed tab, for actions on a song from search. */
-async function tabForSong(videoId: string): Promise<TrackSource> {
+async function tabForSong(videoId: string): Promise<TabSource> {
     if (!VIDEO_ID.test(videoId)) throw new Error('Invalid video id')
     const tab = await defaultTab()
     if (!tab) throw new Error(transport.openHint)
@@ -666,7 +666,7 @@ const START_RADIO_JS = `
     }`
 
 /** Starts a radio from the song playing in a tab, replacing its queue. */
-export async function startRadio(source: TrackSource): Promise<void> {
+export async function startRadio(source: TabSource): Promise<void> {
     // The page URL doesn't always carry the current song's id (e.g. on a
     // library page with the mini player), but YouTube's player knows it; it
     // lives in the page world.
@@ -730,7 +730,7 @@ export async function openYouTubeMusic(browser: BrowserName, afterTabMade?: () =
         // Making a tab can bring the browser forward (it does on macOS);
         // afterTabMade hands focus back to the app the user was in.
         await afterTabMade?.()
-        const source: TrackSource = { browser, windowId, tabId }
+        const source: TabSource = { browser, windowId, tabId }
         const started = Date.now()
         log.info(`made a YT Music tab (${placement})`, source)
 

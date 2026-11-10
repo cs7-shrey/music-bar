@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Globe, Keyboard, SlidersHorizontal } from 'lucide-react'
+import { AudioLines, Globe, Keyboard, SlidersHorizontal } from 'lucide-react'
 import type { BrowserName, InstalledBrowser, LoginItemInfo, SettingsSection } from '../shared/ipc'
 import { BROWSER_NAMES } from './now-playing'
 import {
@@ -13,6 +13,7 @@ import {
     type BrowserCheck,
 } from './setup'
 import markUrl from '../../assets/mark.svg'
+import { SpotifySection } from './spotify-settings'
 import { hasModifier, isMac, isWayland, keyCaps, keys, SUPPORTED_BROWSERS, TOGGLE_COMMAND, TRAY } from './platform'
 
 // The settings window, which the setup window becomes once browsers are
@@ -23,6 +24,7 @@ import { hasModifier, isMac, isWayland, keyCaps, keys, SUPPORTED_BROWSERS, TOGGL
 const SECTIONS: { id: SettingsSection; label: string; icon: typeof Globe }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'browsers', label: 'Browsers', icon: Globe },
+    { id: 'spotify', label: 'Spotify', icon: AudioLines },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
 ]
 
@@ -85,6 +87,7 @@ export default function Settings() {
                     <div className="max-w-[640px]">
                         {section === 'general' && <GeneralSection />}
                         {section === 'browsers' && <BrowsersSection />}
+                        {section === 'spotify' && <SpotifySection />}
                         {section === 'shortcuts' && <ShortcutsSection />}
                     </div>
                 </div>
