@@ -1,5 +1,4 @@
 import { app, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type NativeImage } from 'electron'
-import { join } from 'path'
 import { IPC, type BrowserName, type PlayerControl, type SettingsSection, type TrackSource } from '../shared/ipc'
 import {
     createLauncherWindow,
@@ -20,12 +19,25 @@ import { describe, logFile, logger } from './log'
 import { canOpenAtLogin, isOpenAtLogin, openedAtLogin, refreshOpenAtLogin, setOpenAtLogin } from './login-item'
 import { borrowSystemShortcut, returnSystemShortcuts } from './system-shortcuts'
 import { installUpdate, startUpdater, updateReady } from './updater'
+import { extensionDir, openExtensionsPage, startLinuxBridge } from './linux-transport'
+import { resourcePath } from './resources'
+import { isWayland } from './session'
+
+const isMac = process.platform === 'darwin'
 
 // macOS 27 gives ⌘⇧Space to Siri; Music Bar borrows it while running (see
 // system-shortcuts.ts). If that fails, ⌥⇧Space opens the launcher too.
-const SHORTCUT = 'Command+Shift+Space'
+// Linux uses Ctrl for ⌘, as everywhere in the app.
+const SHORTCUT = isMac ? 'Command+Shift+Space' : 'Control+Shift+Space'
 const FALLBACK_SHORTCUT = 'Alt+Shift+Space'
 const SETTINGS_SHORTCUT = 'CommandOrControl+,'
+
+/**
+ * `music-bar --toggle` does what the shortcut does. Wayland compositors don't
+ * let apps take keys for themselves, so there the user binds a key to this
+ * command instead; it reaches the running app as a second instance.
+ */
+const TOGGLE_FLAG = '--toggle'
 
 let tray: Tray | null = null
 
@@ -102,7 +114,19 @@ function menuIcon(symbol: string): NativeImage {
     return icon
 }
 
-app.on('second-instance', openMusicBar)
+function openFromShortcut(): void {
+    if (getSettings().browsers === null) return showSetup()
+    if (getSettings().awaitingShortcut) {
+        // Setup's last screen asked for this press: the user has the
+        // shortcut now, so setup is over.
+        updateSettings({ awaitingShortcut: false })
+        log.info('opened with the shortcut for the first time')
+        return void closeSetup().then(showLauncher)
+    }
+    toggleLauncher()
+}
+
+app.on('second-instance', (_event, argv) => (argv.includes(TOGGLE_FLAG) ? openFromShortcut() : openMusicBar()))
 // Opening the app again from Spotlight, Finder or Launchpad while it runs
 // reopens it rather than starting a second copy. Show the launcher, like
 // Raycast, instead of quietly taking focus with nothing on screen.
@@ -110,11 +134,12 @@ app.on('activate', openMusicBar)
 
 function createTray(): void {
     // A template image: macOS tints it for light and dark menu bars and picks
-    // trayTemplate@2x.png on Retina screens. Packaged builds carry it in
-    // Resources (extraResource in forge.config.ts).
-    const assets = app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'assets')
-    const icon = nativeImage.createFromPath(join(assets, 'trayTemplate.png'))
-    icon.setTemplateImage(true)
+    // trayTemplate@2x.png on Retina screens. Linux panels can't tint, so they
+    // get the note on its dark circle, which shows on light and dark panels
+    // alike. Packaged builds carry both in Resources (extraResource in
+    // forge.config.ts).
+    const icon = nativeImage.createFromPath(resourcePath(isMac ? 'trayTemplate.png' : 'tray.png'))
+    icon.setTemplateImage(isMac)
     tray = new Tray(icon)
     tray.setToolTip('Music Bar')
     updateTrayMenu()
@@ -131,8 +156,14 @@ function updateTrayMenu(): void {
                       { type: 'separator' as const },
                   ]
                 : []),
-            { label: 'Open Music Bar', accelerator: SHORTCUT, click: openMusicBar },
-            { label: 'Settings…', icon: menuIcon('gearshape'), accelerator: SETTINGS_SHORTCUT, click: () => openSettings() },
+            // On Wayland the key is whatever the user bound in their compositor.
+            { label: 'Open Music Bar', accelerator: isWayland ? undefined : SHORTCUT, click: openMusicBar },
+            {
+                label: 'Settings…',
+                icon: isMac ? menuIcon('gearshape') : undefined,
+                accelerator: SETTINGS_SHORTCUT,
+                click: () => openSettings(),
+            },
             { label: 'Show Log File', click: () => shell.showItemInFolder(logFile()) },
             { type: 'separator' },
             { label: 'Quit Music Bar', role: 'quit' },
@@ -143,19 +174,22 @@ function updateTrayMenu(): void {
 app.whenReady().then(() => {
     log.info(`Music Bar ${app.getVersion()} started`, {
         electron: process.versions.electron,
-        macOS: process.getSystemVersion(),
+        os: `${process.platform} ${process.getSystemVersion()}`,
+        ...(process.platform === 'linux' && { session: isWayland ? 'wayland' : 'x11' }),
         arch: process.arch,
         packaged: app.isPackaged,
         openedAtLogin,
         openAtLogin: isOpenAtLogin(),
-        installed: youtubeMusic.installedBrowsers().map(({ browser }) => browser),
+        installed: youtubeMusic.installedBrowsers(),
         chosen: getSettings().browsers,
     })
     // Replaces Electron's default menu, whose Hide item owns ⌘H before the
     // launcher sees it (⌘H is "previous"). The Edit menu keeps copy/paste
     // working in the search box, and ⌘, opens settings from the launcher.
+    // Elsewhere a menu would show as a bar in every window: none, and the
+    // launcher handles Ctrl+, itself.
     Menu.setApplicationMenu(
-        Menu.buildFromTemplate([
+        isMac ? Menu.buildFromTemplate([
             {
                 label: app.name,
                 submenu: [
@@ -165,7 +199,7 @@ app.whenReady().then(() => {
                 ],
             },
             { role: 'editMenu' },
-        ]),
+        ]) : null,
     )
     // Covers `pnpm dev`, where LSUIElement from forge.config.ts does not apply.
     app.dock?.hide()
@@ -173,6 +207,9 @@ app.whenReady().then(() => {
     // renderer's prefers-color-scheme.
     nativeTheme.themeSource = 'dark'
 
+    // Before anything reads a tab: on Linux, tabs are reached through the
+    // browser extension, which connects to the bridge.
+    if (process.platform === 'linux') startLinuxBridge()
     createLauncherWindow()
     createTray()
     refreshOpenAtLogin()
@@ -217,13 +254,9 @@ app.whenReady().then(() => {
     handleAction(IPC.loginItemSet, (enabled: boolean) => setOpenAtLogin(enabled))
     ipcMain.handle(IPC.setupGet, async () => ({
         installed: await Promise.all(
-            youtubeMusic.installedBrowsers().map(async ({ browser, path }) => ({
+            youtubeMusic.installedBrowsers().map(async (browser) => ({
                 browser,
-                // Not app.getFileIcon: it crashes Electron on macOS 26.
-                icon: await nativeImage
-                    .createThumbnailFromPath(path, { width: 72, height: 72 })
-                    .then((image) => image.toDataURL())
-                    .catch(() => null),
+                icon: await youtubeMusic.browserIcon(browser),
             })),
         ),
         chosen: getSettings().browsers,
@@ -235,6 +268,13 @@ app.whenReady().then(() => {
     ipcMain.handle(IPC.setupOpenAutomationSettings, () =>
         shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation'),
     )
+    // Linux: setting up the browser extension.
+    ipcMain.handle(IPC.setupGetExtensionFolder, () => extensionDir())
+    handleAction(IPC.setupShowExtensionFolder, async () => {
+        const failure = await shell.openPath(extensionDir())
+        if (failure) throw new Error(failure)
+    })
+    handleAction(IPC.setupOpenExtensionsPage, (browser: BrowserName) => openExtensionsPage(browser))
     ipcMain.on(IPC.setupFinish, () => {
         updateSettings({ awaitingShortcut: true })
         log.info('setup finished', getSettings())
@@ -250,16 +290,9 @@ app.whenReady().then(() => {
     handleAction(IPC.startRadio, (source: TrackSource) => youtubeMusic.startRadio(source))
     handleAction(IPC.startRadioFromSong, (videoId: string) => youtubeMusic.startRadioFromSong(videoId))
 
-    const openFromShortcut = () => {
-        if (getSettings().browsers === null) return showSetup()
-        if (getSettings().awaitingShortcut) {
-            // Setup's last screen asked for this press: the user has the
-            // shortcut now, so setup is over.
-            updateSettings({ awaitingShortcut: false })
-            log.info('opened with the shortcut for the first time')
-            return void closeSetup().then(showLauncher)
-        }
-        toggleLauncher()
+    if (isWayland) {
+        log.info(`Wayland: the launcher opens with \`${TOGGLE_FLAG}\`, from a key bound in the compositor`)
+        return
     }
     const borrowed = borrowSystemShortcut(SHORTCUT)
     for (const shortcut of borrowed ? [SHORTCUT] : [SHORTCUT, FALLBACK_SHORTCUT]) {

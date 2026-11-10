@@ -56,6 +56,12 @@ export const IPC = {
     setupOpenBrowser: 'setup:open-browser',
     /** renderer → main (invoke): open System Settings → Privacy & Security → Automation. */
     setupOpenAutomationSettings: 'setup:open-automation-settings',
+    /** renderer → main (invoke): Linux; the folder to load the browser extension from. */
+    setupGetExtensionFolder: 'setup:get-extension-folder',
+    /** renderer → main (invoke): Linux; show that folder in the file manager. */
+    setupShowExtensionFolder: 'setup:show-extension-folder',
+    /** renderer → main (invoke): Linux; open a browser's extensions page. */
+    setupOpenExtensionsPage: 'setup:open-extensions-page',
     /**
      * renderer → main: setup's checks are done. Setup stays on its last
      * screen until the user opens Music Bar with the shortcut.
@@ -69,7 +75,8 @@ export const IPC = {
     updateReady: 'update:ready',
 } as const
 
-export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium'
+/** Helium on macOS only, Chromium on Linux only. */
+export type BrowserName = 'Brave Browser' | 'Google Chrome' | 'Helium' | 'Chromium'
 
 export type SettingsSection = 'general' | 'browsers' | 'shortcuts'
 
@@ -123,11 +130,14 @@ export interface Track {
  * Whether Music Bar can use an open browser:
  * - connected: has a YouTube Music tab it can read and control
  * - no-tab: open, but no YouTube Music tab
- * - needs-setup: "Allow JavaScript from Apple Events" is off (error 12)
+ * - needs-setup: scripts can't run in its tabs: on macOS, "Allow JavaScript
+ *   from Apple Events" is off (error 12); on Linux, "Allow User Scripts" is
+ *   off for the Music Bar extension
  * - needs-permission: macOS hasn't allowed Music Bar to control it (error -1743)
+ * - needs-extension: Linux only; the Music Bar extension isn't installed or connected
  * - error: anything else; see message
  */
-export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'error'
+export type BrowserState = 'connected' | 'no-tab' | 'needs-setup' | 'needs-permission' | 'needs-extension' | 'error'
 
 /** A browser's state during setup: as above, or not open, so it can't be checked yet. */
 export type BrowserSetupState = BrowserState | 'not-running'
@@ -178,6 +188,10 @@ export type SearchResults =
 export type PlayerControl = 'previous' | 'next'
 
 export interface MusicBarApi {
+    /** Which platform this is; Linux uses Ctrl for ⌘, and a browser extension for AppleScript. */
+    platform: 'darwin' | 'linux'
+    /** Wayland, where the launcher's key is bound in the compositor (to `music-bar --toggle`). */
+    wayland: boolean
     hide(): void
     onShown(listener: () => void): () => void
     onHidden(listener: () => void): () => void
@@ -208,6 +222,9 @@ export interface MusicBarApi {
     checkBrowser(browser: BrowserName): Promise<BrowserSetupState>
     openBrowser(browser: BrowserName): Promise<void>
     openAutomationSettings(): Promise<void>
+    getExtensionFolder(): Promise<string>
+    showExtensionFolder(): Promise<void>
+    openExtensionsPage(browser: BrowserName): Promise<void>
     finishSetup(): void
     /** The version downloaded and waiting for a restart, or null. */
     getUpdate(): Promise<string | null>

@@ -9,6 +9,7 @@ import type {
     SearchSong,
     Track,
 } from '../shared/ipc'
+import { hasModifier, keys, MODIFIER_KEY } from './platform'
 
 const POLL_MS = 2000
 // While a song loads, reads come this often, so "Fetching…" ends soon after
@@ -49,7 +50,12 @@ export type PressedOn = 'card' | 'list'
 
 const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.artist
 
-export const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
+export const BROWSER_NAMES: Record<BrowserName, string> = {
+    'Brave Browser': 'Brave',
+    'Google Chrome': 'Chrome',
+    Helium: 'Helium',
+    Chromium: 'Chromium',
+}
 
 /** Polls the current YouTube Music track while the launcher is visible. */
 export function useNowPlaying() {
@@ -531,7 +537,7 @@ export function NowPlaying({
             onArtworkClick={syncing ? undefined : goToTab}
             artworkWaiting={queued.has('tab')}
             artworkPressed={coverPressed}
-            artworkShortcut={showShortcuts ? '⌘⇧O' : undefined}
+            artworkShortcut={showShortcuts ? keys('⌘⇧O') : undefined}
             eyebrow={
                 track.playBlocked
                     ? `${BROWSER_NAMES[track.source.browser]} blocked playback`
@@ -551,22 +557,22 @@ export function NowPlaying({
                         label={
                             track.isAd
                                 ? 'Not available during ads'
-                                : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (⌘O)`
+                                : `${repeatLabel} · ${looping ? 'stop looping' : 'loop this song'} (${keys('⌘O')})`
                         }
                         onClick={() => toggleLoop('card')}
                         active={track.repeatMode !== 'NONE'}
                         disabled={track.isAd}
                         waiting={queued.get('loop') === 'card'}
-                        shortcut={showShortcuts && !track.isAd ? '⌘O' : undefined}
+                        shortcut={showShortcuts && !track.isAd ? keys('⌘O') : undefined}
                     >
                         <RepeatIcon mode={track.repeatMode} />
                     </IconButton>
                     <IconButton
-                        label="Previous (⌘H)"
+                        label={`Previous (${keys('⌘H')})`}
                         onClick={() => control('previous')}
                         pressed={pressed === 'previous'}
                         active
-                        shortcut={showShortcuts ? '⌘H' : undefined}
+                        shortcut={showShortcuts ? keys('⌘H') : undefined}
                     >
                         <SkipIcon direction="previous" />
                     </IconButton>
@@ -586,11 +592,11 @@ export function NowPlaying({
                         )}
                     </button>
                     <IconButton
-                        label="Next (⌘L)"
+                        label={`Next (${keys('⌘L')})`}
                         onClick={() => control('next')}
                         pressed={pressed === 'next'}
                         active
-                        shortcut={showShortcuts ? '⌘L' : undefined}
+                        shortcut={showShortcuts ? keys('⌘L') : undefined}
                     >
                         <SkipIcon direction="next" />
                     </IconButton>
@@ -687,8 +693,8 @@ function Artwork({
             {onClick ? (
                 <button
                     type="button"
-                    aria-label="Go to the tab playing this (⌘⇧O)"
-                    title="Go to the tab playing this (⌘⇧O)"
+                    aria-label={`Go to the tab playing this (${keys('⌘⇧O')})`}
+                    title={`Go to the tab playing this (${keys('⌘⇧O')})`}
                     tabIndex={-1}
                     // Keep focus in the search input.
                     onMouseDown={(event) => event.preventDefault()}
@@ -780,7 +786,7 @@ function IconButton({
 }
 
 /**
- * Whether ⌘ is held on its own, as macOS menus and Raycast use it: the player
+ * Whether ⌘ (Linux: Ctrl) is held on its own, as macOS menus and Raycast use it: the player
  * buttons then show their shortcuts (⌘H previous, ⌘L next, ⌘O loop, ⌘⇧O
  * go to the tab), which
  * nothing else on screen teaches.
@@ -798,16 +804,16 @@ function useCommandHeld(): boolean {
             setHeld(false)
         }
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Meta') {
+            if (event.key === MODIFIER_KEY) {
                 if (timer === undefined) timer = setTimeout(() => setHeld(true), SHORTCUT_HINT_DELAY_MS)
-            } else if (event.metaKey) {
+            } else if (hasModifier(event)) {
                 // A shortcut before the delay: no hints. Once they show, they
                 // stay while ⌘ is down, so several skips in a row keep them.
                 cancel()
             } else release()
         }
         const onKeyUp = (event: KeyboardEvent) => {
-            if (event.key === 'Meta') release()
+            if (event.key === MODIFIER_KEY) release()
         }
         window.addEventListener('keydown', onKeyDown)
         window.addEventListener('keyup', onKeyUp)

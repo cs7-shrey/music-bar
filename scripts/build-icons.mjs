@@ -7,7 +7,11 @@
 // assets/trayTemplate.svg + trayTemplate.png / @2x.png (black on
 // transparent, which macOS tints for light and dark menu bars), and
 // assets/dmg-background.png / @2x.png (the installer window).
-// Needs macOS for iconutil.
+// For Linux: assets/icon.png (windows and the menu entry), assets/tray.png /
+// @2x.png (the mark, which shows on light and dark panels; Linux can't tint
+// a template), and extension/icon-128.png (the browser extension's icon).
+// The .icns (iconutil) and the DMG background (set in Helvetica Neue) need
+// macOS; elsewhere they're left as they are.
 
 import { execFileSync } from 'child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -16,6 +20,7 @@ import { join } from 'path'
 import { Resvg } from '@resvg/resvg-js'
 
 const ASSETS = join(import.meta.dirname, '..', 'assets')
+const EXTENSION = join(import.meta.dirname, '..', 'extension')
 
 // assets/note.svg, in drawing order: the note's body (stem, flag and head as
 // one solid shape), the inside of the flag, the tick in the flag, the dot.
@@ -118,6 +123,20 @@ writeFileSync(join(ASSETS, 'mark.svg'), mark)
 writeFileSync(join(ASSETS, 'trayTemplate.svg'), tray)
 writeFileSync(join(ASSETS, 'trayTemplate.png'), render(tray, TRAY_SIZE))
 writeFileSync(join(ASSETS, 'trayTemplate@2x.png'), render(tray, TRAY_SIZE * 2))
+// Linux panels draw tray icons at about 22px.
+const LINUX_TRAY_SIZE = 22
+writeFileSync(join(ASSETS, 'icon.png'), render(icon, 512))
+writeFileSync(join(ASSETS, 'tray.png'), render(mark, LINUX_TRAY_SIZE))
+writeFileSync(join(ASSETS, 'tray@2x.png'), render(mark, LINUX_TRAY_SIZE * 2))
+writeFileSync(join(EXTENSION, 'icon-128.png'), render(icon, 128))
+
+// The DMG's text is set in Helvetica Neue and the .icns needs iconutil, so
+// both are macOS only; elsewhere they're left as they are.
+if (process.platform !== 'darwin') {
+    console.log('Wrote the PNGs; the .icns and DMG background need macOS, so they were left as they are')
+    process.exit(0)
+}
+
 writeFileSync(join(ASSETS, 'dmg-background.png'), render(dmgBackground, DMG_CANVAS.width))
 writeFileSync(join(ASSETS, 'dmg-background@2x.png'), render(dmgBackground, DMG_CANVAS.width * 2))
 

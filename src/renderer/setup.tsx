@@ -3,11 +3,14 @@ import { Check } from 'lucide-react'
 import type { BrowserName, BrowserSetupState, InstalledBrowser } from '../shared/ipc'
 import { BROWSER_NAMES } from './now-playing'
 import markUrl from '../../assets/mark.svg'
+import { isMac, isWayland, keyCaps, keys, SUPPORTED_BROWSERS, TOGGLE_COMMAND, TRAY } from './platform'
 
 // The setup window: pick the browsers Music Bar may use, then walk each one
 // through opening it, allowing Automation, and turning on JavaScript from
-// Apple Events, with live checks. Last, it asks for ⌘⇧Space, and stays on
-// that screen until Music Bar is opened with it (main closes the window).
+// Apple Events, with live checks (on Linux: opening it, adding the Music Bar
+// extension, and allowing it user scripts). Last, it asks for ⌘⇧Space, and
+// stays on that screen until Music Bar is opened with it (main closes the
+// window). On Wayland, that's a key the user binds to `music-bar --toggle`.
 
 // Pause between rounds of checks.
 const CHECK_INTERVAL_MS = 1500
@@ -71,8 +74,9 @@ export default function Setup() {
 
     return (
         <div className="flex h-full flex-col bg-base text-white">
-            {/* Room for the traffic lights, and something to drag the window by. */}
-            <div className="h-11 shrink-0 [-webkit-app-region:drag]" />
+            {/* Room for the traffic lights, and something to drag the window by.
+                Other platforms have a title bar of their own. */}
+            <div className={`${isMac ? 'h-11' : 'h-7'} shrink-0 [-webkit-app-region:drag]`} />
             <div className="flex min-h-0 flex-1 flex-col px-9 pb-8">
                 <header className="flex flex-col items-start gap-4">
                     <img src={markUrl} alt="" className="size-14" draggable={false} />
@@ -87,15 +91,19 @@ export default function Setup() {
                         <p className="text-sm font-medium text-subdued">
                             {step === 'choose' ? (
                                 <>
-                                    Control YouTube Music from anywhere with <Keys>⌘⇧Space</Keys>. Choose the browsers you
-                                    play it in.
+                                    Control YouTube Music from anywhere with <LauncherKeys />. Choose the browsers you play
+                                    it in.
                                 </>
                             ) : step === 'connect' ? (
                                 'Music Bar controls YouTube Music through your browser. Each one needs a one-time setup.'
                             ) : (
-                                <>
-                                    Press <Keys>⌘⇧Space</Keys> to open Music Bar. It works from any app.
-                                </>
+                                isWayland ? (
+                                    'Bind a key to Music Bar in your desktop’s keyboard settings, then press it.'
+                                ) : (
+                                    <>
+                                        Press <Keys>{keys('⌘⇧Space')}</Keys> to open Music Bar. It works from any app.
+                                    </>
+                                )
                             )}
                         </p>
                     </div>
@@ -109,7 +117,7 @@ export default function Setup() {
                                 <div className="flex flex-1 flex-col gap-0.5">
                                     <span className="text-sm font-bold">Open at login</span>
                                     <span className="text-xs font-medium text-subdued">
-                                        Starts quietly in the menu bar, so <Keys>⌘⇧Space</Keys> always works.
+                                        Starts quietly in the {TRAY}, so <LauncherKeys /> always works.
                                     </span>
                                 </div>
                                 <Switch
@@ -129,7 +137,7 @@ export default function Setup() {
                 <footer className="mt-6 flex shrink-0 items-center justify-between gap-4">
                     {step === 'choose' ? (
                         <>
-                            <span className="text-xs font-medium text-faint">You can change this later from the menu bar.</span>
+                            <span className="text-xs font-medium text-faint">You can change this later from the {TRAY}.</span>
                             <PrimaryButton disabled={chosen.length === 0} onClick={() => void next()}>
                                 Continue
                             </PrimaryButton>
@@ -189,7 +197,7 @@ function ChooseBrowsers({
     if (installed.length === 0) {
         return (
             <p className="mt-8 flex-1 text-sm font-medium text-subdued">
-                Music Bar works with Brave, Chrome and Helium. Install one of them, then open Music Bar again.
+                Music Bar works with {SUPPORTED_BROWSERS}. Install one of them, then open Music Bar again.
             </p>
         )
     }
@@ -309,21 +317,64 @@ function ConnectBrowsers({
     )
 }
 
-/** ⌘⇧Space as big key caps, for the last screen. */
+/** The launcher's shortcut in running text; on Wayland, whatever key the user binds. */
+function LauncherKeys() {
+    return isWayland ? <>a key you choose</> : <Keys>{keys('⌘⇧Space')}</Keys>
+}
+
+/** ⌘⇧Space as big key caps, for the last screen; on Wayland, the command to bind a key to. */
 function ShortcutKeys() {
+    if (isWayland) return <BindCommand />
     return (
-        <div className="flex flex-1 items-center justify-center gap-3" aria-label="Command Shift Space">
-            {['⌘', '⇧', 'Space'].map((key) => (
+        <div className="flex flex-1 items-center justify-center gap-3" aria-label={isMac ? 'Command Shift Space' : 'Control Shift Space'}>
+            {keyCaps(['⌘', '⇧', 'Space']).map((key) => (
                 <kbd
                     key={key}
                     className={`flex h-20 items-center justify-center rounded-2xl bg-elevated font-sans text-3xl font-bold text-white shadow-[inset_0_-4px_0_rgba(0,0,0,0.4)] ring-1 ring-white/10 ring-inset ${
-                        key === 'Space' ? 'w-48' : 'w-20'
+                        key === 'Space' ? 'w-48' : isMac ? 'w-20' : 'w-28'
                     }`}
                 >
                     {key}
                 </kbd>
             ))}
         </div>
+    )
+}
+
+/**
+ * Wayland's last screen: the command a key should run, to copy into the
+ * desktop's keyboard settings (GNOME, KDE) or compositor config (Hyprland,
+ * Sway). The README has examples.
+ */
+function BindCommand() {
+    return (
+        <div className="flex flex-1 flex-col justify-center gap-4">
+            <p className="text-sm font-medium text-subdued">
+                Wayland doesn’t let apps take a key for themselves. Make a shortcut that runs this command; Ctrl+Shift+Space
+                works well:
+            </p>
+            <div className="flex items-center gap-3 rounded-xl bg-elevated px-4 py-3">
+                <code className="flex-1 font-mono text-[15px] font-semibold text-white">{TOGGLE_COMMAND}</code>
+                <CopyButton text={TOGGLE_COMMAND} />
+            </div>
+            <p className="text-xs font-medium text-faint">
+                Hyprland and Sway can also float the launcher: its window is titled “Music Bar Launcher”.
+            </p>
+        </div>
+    )
+}
+
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+    const [copied, setCopied] = useState(false)
+    useEffect(() => {
+        if (!copied) return
+        const timer = setTimeout(() => setCopied(false), 1500)
+        return () => clearTimeout(timer)
+    }, [copied])
+    return (
+        <SmallButton onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true))}>
+            {copied ? 'Copied' : label}
+        </SmallButton>
     )
 }
 
@@ -357,6 +408,62 @@ export function StatusPill({ check }: { check: BrowserCheck }) {
 
 /** The three setup steps for one browser, ticked off as its checks pass. */
 export function SetupSteps({ browser, check }: { browser: BrowserName; check: BrowserCheck }) {
+    return isMac ? <MacSetupSteps browser={browser} check={check} /> : <LinuxSetupSteps browser={browser} check={check} />
+}
+
+/**
+ * Linux: open the browser, add the Music Bar extension (loaded unpacked
+ * from the folder Music Bar keeps it in), and allow it user scripts, which
+ * is how it runs Music Bar's scripts in YouTube Music tabs.
+ */
+function LinuxSetupSteps({ browser, check }: { browser: BrowserName; check: BrowserCheck }) {
+    const name = BROWSER_NAMES[browser]
+    const { state } = check
+    const [folder, setFolder] = useState<string | null>(null)
+    useEffect(() => {
+        void window.musicBar.getExtensionFolder().then(setFolder)
+    }, [])
+
+    const opened: StepStatus = state === null ? 'waiting' : state === 'not-running' ? 'current' : 'done'
+    const added: StepStatus = opened !== 'done' ? 'waiting' : state === 'needs-extension' ? 'current' : 'done'
+    const allowed: StepStatus = added !== 'done' ? 'waiting' : isReady(state) ? 'done' : 'current'
+
+    return (
+        <ol className="flex flex-col gap-2.5 pl-1">
+            <Step status={opened} title={`Open ${name}`}>
+                <SmallButton onClick={() => void window.musicBar.openBrowser(browser)}>Open {name}</SmallButton>
+            </Step>
+            <Step status={added} title="Add the Music Bar extension">
+                <p>
+                    On {name}’s extensions page, turn on <Keys>Developer mode</Keys>, click <Keys>Load unpacked</Keys> and
+                    choose this folder. In the file picker, <Keys>Ctrl+L</Keys> lets you paste it.
+                </p>
+                {folder && <code className="font-mono text-xs break-all text-white">{folder}</code>}
+                <span className="flex flex-wrap gap-2">
+                    <SmallButton onClick={() => void window.musicBar.openExtensionsPage(browser)}>
+                        Open Extensions Page
+                    </SmallButton>
+                    {folder && <CopyButton text={folder} label="Copy Folder Path" />}
+                    <SmallButton onClick={() => void window.musicBar.showExtensionFolder()}>Show Folder</SmallButton>
+                </span>
+            </Step>
+            <Step status={allowed} title="Allow User Scripts">
+                {state === 'failed' || state === 'error' ? (
+                    <p>Music Bar couldn't reach {name}. Quit and reopen it, then check again.</p>
+                ) : (
+                    <p>
+                        On the extensions page, click <Keys>Details</Keys> on Music Bar and turn on{' '}
+                        <Keys>Allow User Scripts</Keys>. That lets it run Music Bar’s scripts in YouTube Music tabs, and
+                        nowhere else.
+                    </p>
+                )}
+            </Step>
+        </ol>
+    )
+}
+
+/** macOS: open the browser, allow Automation, allow JavaScript from Apple Events. */
+function MacSetupSteps({ browser, check }: { browser: BrowserName; check: BrowserCheck }) {
     const name = BROWSER_NAMES[browser]
     const { state } = check
     const promptShowing = isPrompting(check)

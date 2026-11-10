@@ -1,5 +1,5 @@
 import type { SearchResults, SearchSong } from '../shared/ipc'
-import { defaultTab, evaluateAsyncInTab } from './youtube-music'
+import { defaultTab, evaluateAsyncInTab, tabsUnavailableMessage } from './youtube-music'
 import { describe, logger } from './log'
 
 // Search goes through YouTube Music's own internal API (the endpoints its
@@ -53,7 +53,7 @@ function innerTubeRequest(endpoint: string, payload: Record<string, string>): st
 
 async function requestInTab(endpoint: string, payload: Record<string, string>): Promise<unknown> {
     const tab = await defaultTab()
-    if (!tab) throw new Error('Open YouTube Music in Brave, Chrome or Helium')
+    if (!tab) throw new Error(tabsUnavailableMessage())
     return JSON.parse(await evaluateAsyncInTab(tab, innerTubeRequest(endpoint, payload)))
 }
 

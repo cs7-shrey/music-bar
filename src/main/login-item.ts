@@ -4,20 +4,31 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { logger } from './log'
 
-// Open at login, as a LaunchAgent: a plist in ~/Library/LaunchAgents that
-// launchd reads at each login. Not Electron's login item (SMAppService),
-// because on macOS 13+ it can't tell the app it was opened at login, and a
-// login launch must start quietly in the menu bar, not pop the launcher.
-// Here launchd passes LOGIN_FLAG instead. The file existing is the setting.
+// Open at login, written as a file the system reads at each login, with
+// LOGIN_FLAG on the command so a login launch starts quietly in the menu bar
+// instead of popping the launcher. The file existing is the setting.
+//
+// macOS: a LaunchAgent, a plist in ~/Library/LaunchAgents that launchd
+// reads. Not Electron's login item (SMAppService), because on macOS 13+ it
+// can't tell the app it was opened at login.
+//
+// Linux: an XDG autostart entry in ~/.config/autostart, which GNOME, KDE,
+// Xfce and other desktops run at login (window managers like Hyprland or
+// Sway need their own autostart line; see the README).
 
 const LABEL = 'dev.shrey.music-bar'
 const LOGIN_FLAG = '--login'
 
 const log = logger('login-item')
 
-const plistPath = () => join(homedir(), 'Library/LaunchAgents', `${LABEL}.plist`)
+const isMac = process.platform === 'darwin'
 
-/** True when launchd started this run at login. */
+const itemPath = () =>
+    isMac
+        ? join(homedir(), 'Library/LaunchAgents', `${LABEL}.plist`)
+        : join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'autostart', 'music-bar.desktop')
+
+/** True when this run was started at login. */
 export const openedAtLogin = process.argv.includes(LOGIN_FLAG)
 
 /**
@@ -27,16 +38,20 @@ export const openedAtLogin = process.argv.includes(LOGIN_FLAG)
 export const canOpenAtLogin = () => app.isPackaged
 
 export function isOpenAtLogin(): boolean {
-    return existsSync(plistPath())
+    return existsSync(itemPath())
 }
+
+/**
+ * What starts Music Bar. Packages that run it through a shared Electron (Nix
+ * does) set MUSIC_BAR_LAUNCHER to their command, since the executable is then
+ * Electron's.
+ */
+const launcher = () => process.env.MUSIC_BAR_LAUNCHER || app.getPath('exe')
 
 const xml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-function writePlist(): void {
-    mkdirSync(join(plistPath(), '..'), { recursive: true })
-    writeFileSync(
-        plistPath(),
-        `<?xml version="1.0" encoding="UTF-8"?>
+function writePlist(): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -44,7 +59,7 @@ function writePlist(): void {
     <string>${LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${xml(app.getPath('exe'))}</string>
+        <string>${xml(launcher())}</string>
         <string>${LOGIN_FLAG}</string>
     </array>
     <key>RunAtLoad</key>
@@ -53,22 +68,43 @@ function writePlist(): void {
     <string>Interactive</string>
 </dict>
 </plist>
-`,
-    )
+`
+}
+
+/** An Exec= argument, quoted as the desktop entry spec asks. */
+const desktopArgument = (value: string) =>
+    /[\s"'\\$`]/.test(value) ? `"${value.replace(/(["`$\\])/g, '\\$1')}"` : value
+
+function writeDesktopEntry(): string {
+    return `[Desktop Entry]
+Type=Application
+Name=Music Bar
+Comment=Starts Music Bar quietly in the tray
+Exec=${desktopArgument(launcher())} ${LOGIN_FLAG}
+Icon=music-bar
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+`
+}
+
+function writeItem(): void {
+    mkdirSync(join(itemPath(), '..'), { recursive: true })
+    writeFileSync(itemPath(), isMac ? writePlist() : writeDesktopEntry())
 }
 
 export function setOpenAtLogin(enabled: boolean): void {
     if (!canOpenAtLogin()) throw new Error('Open at login works only in the built app')
-    if (enabled) writePlist()
-    else rmSync(plistPath(), { force: true })
-    log.info(enabled ? `on: ${app.getPath('exe')}` : 'off')
+    if (enabled) writeItem()
+    else rmSync(itemPath(), { force: true })
+    log.info(enabled ? `on: ${launcher()}` : 'off')
 }
 
 /**
- * Points the agent at wherever the app is now. Run at startup: an app moved
+ * Points the item at wherever the app is now. Run at startup: an app moved
  * after turning this on (say from Downloads to Applications) would otherwise
- * have launchd look for it in the old place.
+ * be looked for in the old place.
  */
 export function refreshOpenAtLogin(): void {
-    if (canOpenAtLogin() && isOpenAtLogin()) writePlist()
+    if (canOpenAtLogin() && isOpenAtLogin()) writeItem()
 }

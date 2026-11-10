@@ -2,6 +2,8 @@ import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { frontmostApp } from './frontmost-app'
 import { getSettings } from './settings'
+import { resourcePath } from './resources'
+import { sessionArguments } from './session'
 import { IPC, type SettingsSection } from '../shared/ipc'
 
 // The setup window: an ordinary window rather than the launcher panel, since
@@ -40,12 +42,16 @@ export function showSetup(section?: SettingsSection): void {
         maximizable: false,
         fullscreenable: false,
         title: page === 'setup' ? 'Set Up Music Bar' : 'Music Bar Settings',
-        titleBarStyle: 'hiddenInset',
+        // The traffic lights over the page on macOS; an ordinary title bar
+        // elsewhere, where 'hidden' would leave no way to move or close it.
+        ...(process.platform === 'darwin' && { titleBarStyle: 'hiddenInset' as const }),
+        icon: process.platform === 'linux' ? resourcePath('icon.png') : undefined,
         backgroundColor: '#121212',
         webPreferences: {
             preload: join(__dirname, 'preload.js'),
             contextIsolation: true,
             sandbox: true,
+            additionalArguments: sessionArguments(),
         },
     })
 
@@ -77,6 +83,8 @@ export async function closeSetup(): Promise<void> {
     const closing = window
     if (!closing) return
     closing.close()
+    // Only macOS hands the front to another app on its own, after a moment.
+    if (process.platform !== 'darwin') return
     const deadline = Date.now() + HANDOFF_TIMEOUT_MS
     while (Date.now() < deadline) {
         const front = await frontmostApp()

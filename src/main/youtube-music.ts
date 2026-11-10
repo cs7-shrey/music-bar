@@ -1,32 +1,18 @@
-import { execFile } from 'child_process'
 import { randomUUID } from 'crypto'
-import { existsSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
-import type { BrowserName, BrowserSetupState, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type { BrowserName, BrowserSetupState, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
 import { getSettings } from './settings'
 import { describe, logger } from './log'
+import { linuxTransport } from './linux-transport'
+import { macTransport } from './mac-transport'
+import type { BrowserRead, RawTab, TabResult, TabTransport } from './tab-transport'
 
-// Talks to YouTube Music by running JavaScript inside its tab through the
-// browser's AppleScript `execute javascript` command. This works on background
-// tabs, but each browser needs View → Developer → Allow JavaScript from Apple
-// Events turned on once.
+// Talks to YouTube Music by running JavaScript inside its tab, in an
+// isolated world, on background tabs too. The way in depends on the
+// platform (tab-transport.ts): AppleScript's `execute javascript` on macOS,
+// which needs View → Developer → Allow JavaScript from Apple Events turned on
+// once per browser; Music Bar's browser extension on Linux.
 
-const BROWSERS: BrowserName[] = ['Brave Browser', 'Google Chrome', 'Helium']
-
-// Each browser's bundle id. Scripts address browsers by id, never by name:
-// macOS can resolve an app name to a different app (on one Mac, "Brave
-// Browser" while Brave wasn't running turned out to mean Helium), and then
-// Music Bar would drive, and ask permission for, a browser nobody chose.
-const BUNDLE_IDS: Record<BrowserName, string> = {
-    'Brave Browser': 'com.brave.Browser',
-    'Google Chrome': 'com.google.Chrome',
-    Helium: 'net.imput.helium',
-}
-
-/** The browser as an AppleScript application reference, by bundle id. */
-const appRef = (browser: BrowserName) => `application id ${asString(BUNDLE_IDS[browser])}`
-const YT_MUSIC_URL = 'https://music.youtube.com/'
+const transport: TabTransport = process.platform === 'darwin' ? macTransport : linuxTransport
 
 // Chromium holds back loading media in a hidden page that has never played
 // any (a tab restored at launch, or one Music Bar just opened): a play request
@@ -111,24 +97,19 @@ const CONTROL_SELECTORS: Record<PlayerControl, string> = {
     next: '.next-button',
 }
 
-// Where each supported browser is installed, if it is.
-const appPaths = new Map(
-    BROWSERS.flatMap((name) => {
-        const path = [join('/Applications', `${name}.app`), join(homedir(), 'Applications', `${name}.app`)].find(existsSync)
-        return path ? [[name, path] as const] : []
-    }),
-)
+const installed = new Set(transport.installedBrowsers())
 
-/** Launches a browser, found by bundle id (see BUNDLE_IDS). */
+/** Launches a browser. */
 export function openBrowser(browser: BrowserName): void {
-    if (!appPaths.has(browser)) return
-    execFile('open', ['-b', BUNDLE_IDS[browser]])
+    if (installed.has(browser)) transport.openBrowser(browser)
 }
 
-/** Supported browsers on this Mac, with where each is installed. */
-export function installedBrowsers(): { browser: BrowserName; path: string }[] {
-    return [...appPaths].map(([browser, path]) => ({ browser, path }))
+/** Supported browsers on this computer, in the order setup lists them. */
+export function installedBrowsers(): BrowserName[] {
+    return transport.browsers.filter((browser) => installed.has(browser))
 }
+
+export const browserIcon = (browser: BrowserName) => transport.browserIcon(browser)
 
 /**
  * The browsers Music Bar talks to: the ones chosen in setup that are still
@@ -136,12 +117,7 @@ export function installedBrowsers(): { browser: BrowserName; path: string }[] {
  * the user didn't ask for.
  */
 function enabledBrowsers(): BrowserName[] {
-    return (getSettings().browsers ?? []).filter((browser) => appPaths.has(browser))
-}
-
-/** Quotes a string as an AppleScript string literal. */
-function asString(value: string): string {
-    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+    return (getSettings().browsers ?? []).filter((browser) => installed.has(browser))
 }
 
 const log = logger('youtube-music')
@@ -154,44 +130,6 @@ function logChange(subject: string, state: string, ...details: unknown[]): void 
     log.info(`${subject}: ${lastLogged.get(subject) ?? 'unknown'} → ${state}`, ...details)
     lastLogged.set(subject, state)
 }
-
-function runAppleScript(script: string, timeoutMs = 10_000): Promise<string> {
-    return new Promise((resolve, reject) => {
-        execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
-            if (error?.killed) {
-                // Its first line says which browser it was talking to.
-                log.warn(`osascript timed out after ${timeoutMs}ms`, script.trim().split('\n')[0])
-            }
-            if (error) reject(new Error(stderr.trim() || error.message))
-            else resolve(stdout.trim())
-        })
-    })
-}
-
-/**
- * One YT Music tab, or a failed read. `loaded` is false for a tab Brave hasn't
- * loaded (restored at launch without being opened, or discarded to save
- * memory): its scripts never answer, and Brave's tab info doesn't say so.
- */
-type TabResult =
-    | { source: TrackSource; track: Track | null; loaded: boolean; busy?: boolean }
-    | { error: string; code: number | null }
-
-/**
- * One browser's read: whether it's open, and what its YT Music tabs returned.
- * With no YT Music tab, `probe` is the result of running `1` in its front
- * tab: 'ok' when JavaScript from Apple Events works, else the error number.
- */
-interface BrowserRead {
-    browser: BrowserName
-    running: boolean
-    results: TabResult[]
-    probe?: 'ok' | number
-}
-
-// AppleScript error numbers that get their own browser status.
-const ERROR_JS_FROM_APPLE_EVENTS_OFF = 12
-const ERROR_NOT_AUTHORIZED = -1743
 
 // How long one tab gets to answer before it counts as not loaded. Without a
 // limit, one unloaded tab hangs the whole read.
@@ -237,130 +175,40 @@ async function readBrowser(browser: BrowserName, timeoutMs?: number): Promise<Br
     const now = Date.now()
     const skipIds = [...inactiveUntil]
         .filter(([key, retryAt]) => key.startsWith(`${browser}:`) && retryAt > now)
-        .map(([key]) => asString(key.split(':').at(-1)!))
-    // `tab` is a class name inside the browser's dictionary, so the separator
-    // is bound before entering the tell block. The `whose` filter finds YT
-    // Music tabs in one request instead of asking each tab for its URL.
-    const script = `
-set sep to character id 9
-set out to ""
-set skipIds to {${skipIds.join(', ')}}
-set ytTabs to 0
-if ${appRef(browser)} is running then
-    set out to "running" & linefeed
-    tell ${appRef(browser)}
-        repeat with w in windows
-            repeat with t in (tabs of w whose URL starts with ${asString(YT_MUSIC_URL)})
-                set ytTabs to ytTabs + 1
-                if skipIds contains (id of t as text) then
-                    set out to out & "skipped" & sep & (id of w as text) & sep & (id of t as text) & linefeed
-                else
-                    try
-                        with timeout of ${TAB_ANSWER_SECONDS} seconds
-                            set r to execute t javascript ${asString(READ_TRACK_JS)}
-                        end timeout
-                        if r is missing value then set r to ""
-                        set out to out & "tab" & sep & (id of w as text) & sep & (id of t as text) & sep & r & linefeed
-                    on error message number errorNumber
-                        if errorNumber is -1712 then
-                            set out to out & "unloaded" & sep & (id of w as text) & sep & (id of t as text) & linefeed
-                        else
-                            set out to out & "error" & sep & errorNumber & sep & message & linefeed
-                        end if
-                    end try
-                end if
-            end repeat
-        end repeat
-        if ytTabs is 0 then
-            try
-                with timeout of ${TAB_ANSWER_SECONDS} seconds
-                    execute (active tab of window 1) javascript "1"
-                end timeout
-                set out to out & "probe" & sep & "ok" & linefeed
-            on error message number errorNumber
-                set out to out & "probe" & sep & errorNumber & linefeed
-            end try
-        end if
-    end tell
-end if
-return out`
+        .map(([key]) => Number(key.split(':').at(-1)))
 
-    let output: string
+    let raw: Awaited<ReturnType<TabTransport['readTabs']>>
     try {
-        output = await runAppleScript(script, timeoutMs)
+        raw = await transport.readTabs(browser, READ_TRACK_JS, skipIds, TAB_ANSWER_SECONDS, timeoutMs)
     } catch (error) {
         // Failing as a whole (e.g. not authorized) means the browser is open:
         // the running check itself needs no permission.
-        const message = error instanceof Error ? error.message : String(error)
-        const code = message.match(/\((-?\d+)\)\s*$/)?.[1]
-        return { browser, running: true, results: [{ error: message, code: code ? Number(code) : null }] }
+        const code = error && typeof error === 'object' && 'code' in error ? (error.code as number | string | null) : null
+        return { browser, running: true, results: [{ error: describe(error), code }] }
     }
 
-    const lines = output.split('\n').filter(Boolean)
-    const running = lines[0] === 'running'
-    const probeLine = lines.find((line) => line.startsWith('probe\t'))
-    const probe = probeLine ? (probeLine.split('\t')[1] === 'ok' ? 'ok' : Number(probeLine.split('\t')[1])) : undefined
-    const results = lines.slice(running ? 1 : 0).filter((line) => line !== probeLine).map((line): TabResult => {
-            const [kind, ...rest] = line.split('\t')
-            if (kind === 'error') return { code: Number(rest[0]), error: rest.slice(1).join('\t') }
-            const [windowId, tabId, json] = rest
-            const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
-            if (kind === 'skipped') return { source, track: null, loaded: false }
-            if (kind === 'unloaded') {
-                // Busy: counts as loaded with nothing read, so the card keeps
-                // the followed tab's last track.
-                if (recentlyAnswered(source)) return { source, track: null, loaded: true, busy: true }
-                inactiveUntil.set(tabKey(source), Date.now() + INACTIVE_RETRY_MS)
-                return { source, track: null, loaded: false }
-            }
-            inactiveUntil.delete(tabKey(source))
-            lastAnswered.set(tabKey(source), Date.now())
-            if (!json) return { source, track: null, loaded: true }
-            const track: Track = { ...JSON.parse(json), source }
-            return { source, track, loaded: true }
-        })
-    return { browser, running, results, probe }
-}
-
-// Where each browser keeps its profiles, under ~/Library/Application Support.
-const PROFILE_DIRS: Record<BrowserName, string> = {
-    'Brave Browser': 'BraveSoftware/Brave-Browser',
-    'Google Chrome': 'Google/Chrome',
-    Helium: 'net.imput.helium',
-}
-
-/**
- * The "Allow JavaScript from Apple Events" switch as saved in the browser's
- * last-used profile; null when it can't be read. A missing entry means the
- * default, off. Only a fallback: the file lags behind a fresh change.
- */
-function savedJavaScriptSetting(browser: BrowserName): boolean | null {
-    try {
-        const dir = join(homedir(), 'Library/Application Support', PROFILE_DIRS[browser])
-        const localState = JSON.parse(readFileSync(join(dir, 'Local State'), 'utf8'))
-        const profile = localState.profile?.last_used ?? 'Default'
-        const preferences = JSON.parse(readFileSync(join(dir, profile, 'Preferences'), 'utf8'))
-        return preferences.browser?.allow_javascript_apple_events === true
-    } catch {
-        return null
-    }
+    const results = raw.tabs.map((tab: RawTab): TabResult => {
+        if (tab.kind === 'error') return { code: tab.code, error: tab.message }
+        const source: TrackSource = { browser, windowId: tab.windowId, tabId: tab.tabId }
+        if (tab.kind === 'skipped') return { source, track: null, loaded: false }
+        if (tab.kind === 'unloaded') {
+            // Busy: counts as loaded with nothing read, so the card keeps
+            // the followed tab's last track.
+            if (recentlyAnswered(source)) return { source, track: null, loaded: true, busy: true }
+            inactiveUntil.set(tabKey(source), Date.now() + INACTIVE_RETRY_MS)
+            return { source, track: null, loaded: false }
+        }
+        inactiveUntil.delete(tabKey(source))
+        lastAnswered.set(tabKey(source), Date.now())
+        if (!tab.json) return { source, track: null, loaded: true }
+        const track: Track = { ...JSON.parse(tab.json), source }
+        return { source, track, loaded: true }
+    })
+    return { browser, running: raw.running, results, probe: raw.probe }
 }
 
 /** Sums up one open browser's read for the browser status list. */
-function browserStatus({ browser, results, probe }: BrowserRead): BrowserStatus {
-    const errors = results.flatMap((result) => ('error' in result ? [result] : []))
-    if (errors.some((error) => error.code === ERROR_JS_FROM_APPLE_EVENTS_OFF)) return { browser, state: 'needs-setup' }
-    if (errors.some((error) => error.code === ERROR_NOT_AUTHORIZED)) return { browser, state: 'needs-permission' }
-    // Inactive tabs count as connected: the card offers to load them.
-    if (results.some((result) => 'source' in result)) return { browser, state: 'connected' }
-    if (errors[0]) return { browser, state: 'error', message: errors[0].error }
-    // No YT Music tab: the probe in its front tab says whether one would work.
-    if (probe === ERROR_JS_FROM_APPLE_EVENTS_OFF) return { browser, state: 'needs-setup' }
-    if (probe === ERROR_NOT_AUTHORIZED) return { browser, state: 'needs-permission' }
-    // Inconclusive probe (no window, or the tab didn't answer): the saved setting.
-    if (probe !== 'ok' && savedJavaScriptSetting(browser) === false) return { browser, state: 'needs-setup' }
-    return { browser, state: 'no-tab' }
-}
+const browserStatus = (read: BrowserRead) => transport.status(read)
 
 // A setup check can sit on macOS's permission prompt until the user answers
 // it, and killing osascript early would cut the prompt short.
@@ -371,7 +219,7 @@ const PERMISSION_PROMPT_TIMEOUT_MS = 120_000
  * ask the user to let Music Bar control it.
  */
 export async function checkBrowser(browser: BrowserName): Promise<BrowserSetupState> {
-    if (!appPaths.has(browser)) throw new Error('Unsupported browser')
+    if (!installed.has(browser)) throw new Error('Unsupported browser')
     const started = Date.now()
     const read = await readBrowser(browser, PERMISSION_PROMPT_TIMEOUT_MS)
     const status = read.running ? browserStatus(read) : null
@@ -464,22 +312,27 @@ export async function defaultTab(): Promise<TrackSource | null> {
 }
 
 /**
+ * Checks a tab from the renderer before it goes anywhere near a script:
+ * a browser this platform supports, and whole-number ids.
+ */
+function checkSource(source: TrackSource): void {
+    if (!transport.browsers.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
+        throw new Error('Invalid tab')
+    }
+}
+
+export const tabsUnavailableMessage = () => transport.openHint
+
+/**
  * Runs JavaScript in one specific tab and returns its result as text. A tab
- * that doesn't answer in time (often one Brave hasn't loaded) fails with
- * AppleScript's "AppleEvent timed out" error.
+ * that doesn't answer in time (often one the browser hasn't loaded) fails:
+ * with AppleScript's "AppleEvent timed out" error on macOS.
  */
 async function executeInTab(source: TrackSource, js: string, timeoutSeconds = 3): Promise<string> {
     // The source can come back from the renderer, so it goes through a strict
     // check before it is spliced into a script.
-    if (!BROWSERS.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
-        throw new Error('Invalid tab')
-    }
-    const result = await runAppleScript(`
-with timeout of ${timeoutSeconds} seconds
-    tell ${appRef(source.browser)}
-        execute (tab id ${source.tabId} of window id ${source.windowId}) javascript ${asString(js)}
-    end tell
-end timeout`)
+    checkSource(source)
+    const result = await transport.executeInTab(source, js, timeoutSeconds)
     lastAnswered.set(tabKey(source), Date.now())
     return result
 }
@@ -544,24 +397,7 @@ async function showTabUntil(
     timeoutMs: number,
     failure: string,
 ): Promise<void> {
-    const tell = (body: string) =>
-        runAppleScript(`
-tell ${appRef(source.browser)}
-    set w to window id ${source.windowId}
-${body}
-end tell`)
-    const indexOf = (tabId: string) => `
-    set i to 0
-    repeat with t in tabs of w
-        set i to i + 1
-        if (id of t as text) is "${tabId}" then exit repeat
-    end repeat`
-
-    const previousTabId = await tell(`
-    set previousTabId to id of active tab of w
-${indexOf(String(source.tabId))}
-    set active tab index of w to i
-    return previousTabId as text`)
+    const previousTabId = await transport.activateTab(source)
     try {
         const deadline = Date.now() + timeoutMs
         while (Date.now() < deadline) {
@@ -571,14 +407,7 @@ ${indexOf(String(source.tabId))}
         throw new Error(failure)
     } finally {
         // Switch back only if the user hasn't moved to another tab meanwhile.
-        // Brave reports tab ids as text, so they're compared as text.
-        if (/^\d+$/.test(previousTabId)) {
-            await tell(`
-    if (id of active tab of w as text) is "${source.tabId}" then
-${indexOf(previousTabId)}
-        set active tab index of w to i
-    end if`)
-        }
+        if (/^\d+$/.test(previousTabId)) await transport.restoreTab(source, previousTabId)
     }
 }
 
@@ -688,21 +517,8 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
  * with: the way past a browser that won't let the page play on its own.
  */
 export async function showTab(source: TrackSource): Promise<void> {
-    if (!BROWSERS.includes(source.browser) || !Number.isInteger(source.windowId) || !Number.isInteger(source.tabId)) {
-        throw new Error('Invalid tab')
-    }
-    await runAppleScript(`
-tell ${appRef(source.browser)}
-    set w to window id ${source.windowId}
-    set i to 0
-    repeat with t in tabs of w
-        set i to i + 1
-        if (id of t as text) is "${source.tabId}" then exit repeat
-    end repeat
-    set active tab index of w to i
-    set index of w to 1
-    activate
-end tell`)
+    checkSource(source)
+    await transport.showTab(source)
 }
 
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
@@ -765,7 +581,7 @@ const VIDEO_ID = /^[\w-]{11}$/
 async function tabForSong(videoId: string): Promise<TrackSource> {
     if (!VIDEO_ID.test(videoId)) throw new Error('Invalid video id')
     const tab = await defaultTab()
-    if (!tab) throw new Error('Open YouTube Music in Brave, Chrome or Helium')
+    if (!tab) throw new Error(transport.openHint)
     return tab
 }
 
@@ -909,24 +725,11 @@ const OPEN_TAB_POLL_MS = 100
 export async function openYouTubeMusic(browser: BrowserName, afterTabMade?: () => Promise<void>): Promise<void> {
     if (!enabledBrowsers().includes(browser)) throw new Error('Unsupported browser')
     await enqueue(async () => {
-        const created = await runAppleScript(`
-tell ${appRef(browser)}
-    if (count of windows) is 0 then
-        set w to make new window
-        set URL of active tab of w to ${asString(YT_MUSIC_HOME)}
-        return (id of w as text) & " " & (id of active tab of w as text) & " shown"
-    end if
-    set w to window 1
-    set previousIndex to active tab index of w
-    set t to make new tab at end of tabs of w with properties {URL:${asString(YT_MUSIC_HOME)}}
-    set active tab index of w to previousIndex
-    return (id of w as text) & " " & (id of t as text) & " background"
-end tell`)
-        // Making a tab brings the browser forward; afterTabMade hands focus
-        // back to the app the user was in.
+        const { windowId, tabId, placement } = await transport.openTab(browser, YT_MUSIC_HOME)
+        // Making a tab can bring the browser forward (it does on macOS);
+        // afterTabMade hands focus back to the app the user was in.
         await afterTabMade?.()
-        const [windowId, tabId, placement] = created.split(' ')
-        const source: TrackSource = { browser, windowId: Number(windowId), tabId: Number(tabId) }
+        const source: TrackSource = { browser, windowId, tabId }
         const started = Date.now()
         log.info(`made a YT Music tab (${placement})`, source)
 
