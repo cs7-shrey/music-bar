@@ -109,6 +109,9 @@ async function api<T>(path: string, init: { method?: string } = {}): Promise<T |
         if (reason === 'NO_ACTIVE_DEVICE') throw new Error('Start playing in Spotify first')
         throw new Error(json.error?.message || `Spotify said no (${response.status})`)
     }
+    // Only JSON is read: some calls answer with plain text (adding to the
+    // queue returns an id), which is of no use here.
+    if (!response.headers.get('content-type')?.includes('application/json')) return null
     const text = await response.text()
     return text ? (JSON.parse(text) as T) : null
 }
