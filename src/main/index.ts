@@ -80,7 +80,12 @@ function handleAction<Args extends unknown[]>(channel: string, action: (...args:
     })
 }
 
-if (!app.requestSingleInstanceLock()) {
+// A second copy (opening the app again, or `music-bar --toggle` on every
+// key press under Wayland) hands its arguments to this one and quits. It
+// must not start up meanwhile: on Linux that would replace the running
+// copy's bridge socket and extension folder.
+const isFirstInstance = app.requestSingleInstanceLock()
+if (!isFirstInstance) {
     app.quit()
 }
 
@@ -172,6 +177,7 @@ function updateTrayMenu(): void {
 }
 
 app.whenReady().then(() => {
+    if (!isFirstInstance) return
     log.info(`Music Bar ${app.getVersion()} started`, {
         electron: process.versions.electron,
         os: `${process.platform} ${process.getSystemVersion()}`,

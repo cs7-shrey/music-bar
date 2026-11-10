@@ -432,6 +432,7 @@ async function wakeIfAsleep(source: TrackSource): Promise<void> {
 
 /** Gets the browser to load a tab it restored or discarded without loading. */
 export async function loadTab(source: TrackSource): Promise<void> {
+    checkSource(source)
     await enqueue(() =>
         showTabUntil(
             source,
