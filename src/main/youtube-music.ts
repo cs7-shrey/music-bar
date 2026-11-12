@@ -71,6 +71,25 @@ const SILENT_AUDIO_JS = `(() => {
     return audio;
 })()`
 
+// YouTube Music is testing a redesigned player (signed out, at least). Its
+// controls live in ytmusic-wiz-player-controls instead of the old
+// ytmusic-player-bar. A page has one or the other, so each selector lists
+// both and matches whichever exists.
+const PLAY_PAUSE_BUTTON = 'ytmusic-player-bar #play-pause-button, .ytmusicPlayerControlsPlayPauseButton button'
+const REPEAT_BUTTON = 'ytmusic-player-bar .repeat, .ytmusicPlayerControlsRepeatButton button'
+
+// The repeat mode: 'NONE', 'ALL' or 'ONE'. The old player bar has it as an
+// attribute. The new player only shows it on its repeat button: pressed for
+// all and one, and only the "one" icon draws a 1 (the label is localized).
+const REPEAT_MODE_JS = `(() => {
+    const bar = document.querySelector('ytmusic-player-bar');
+    if (bar) return bar.getAttribute('repeat-mode') || 'NONE';
+    const button = document.querySelector('.ytmusicPlayerControlsRepeatButton button');
+    if (!button || button.getAttribute('aria-pressed') !== 'true') return 'NONE';
+    const icon = button.querySelector('path')?.getAttribute('d') || '';
+    return icon.includes('M13 15V8') || /\\bone\\b/i.test(button.getAttribute('aria-label') || '') ? 'ONE' : 'ALL';
+})()`
+
 // Returns '' when the tab has no track loaded, else the track as JSON.
 // During an ad, YouTube's player gets the ad-showing class and the song info
 // is the ad's; the player bar's play button and slider stop working.
@@ -88,6 +107,8 @@ const READ_TRACK_JS = `(() => {
     if (!m || !m.title) return '';
     const video = document.querySelector('video');
     const slider = document.querySelector('ytmusic-player-bar #progress-bar');
+    // The new player's slider is a plain range input, in seconds.
+    const range = !slider && document.querySelector('input.ytMusicMiniPlayerProgressBar');
     const art = [...m.artwork].sort((a, b) => parseInt(b.sizes) - parseInt(a.sizes))[0];
     return JSON.stringify({
         title: m.title,
@@ -96,10 +117,10 @@ const READ_TRACK_JS = `(() => {
         artworkUrl: art ? art.src : null,
         isPlaying: !!video && !video.paused && !video.ended && video.readyState >= 2,
         isLoading: !!video && !video.paused && !video.ended && video.readyState < 2,
-        repeatMode: document.querySelector('ytmusic-player-bar')?.getAttribute('repeat-mode') || 'NONE',
+        repeatMode: ${REPEAT_MODE_JS},
         isAsleep: ${IS_ASLEEP_JS},
-        position: Number(slider?.getAttribute('aria-valuenow')) || 0,
-        duration: Number(slider?.getAttribute('aria-valuemax')) || null,
+        position: Number(range ? range.value : slider?.getAttribute('aria-valuenow')) || 0,
+        duration: Number(range ? range.max : slider?.getAttribute('aria-valuemax')) || null,
         readAt: Date.now(),
         isAd: !!document.querySelector('#movie_player.ad-showing'),
         playBlocked: !!window.__musicBarBlocked && !navigator.userActivation.hasBeenActive && !(video && !video.paused),
@@ -107,8 +128,8 @@ const READ_TRACK_JS = `(() => {
 })()`
 
 const CONTROL_SELECTORS: Record<PlayerControl, string> = {
-    previous: '.previous-button',
-    next: '.next-button',
+    previous: 'ytmusic-player-bar .previous-button, .ytmusicPlayerControlsPreviousButton button',
+    next: 'ytmusic-player-bar .next-button, .ytmusicPlayerControlsNextButton button',
 }
 
 // Where each supported browser is installed, if it is.
@@ -669,7 +690,11 @@ function enqueue(action: () => Promise<void>): Promise<void> {
  * let play still gets the action, so the song is there to start by hand, but
  * isn't woken: showing it wouldn't help. Reads then report playBlocked.
  */
-async function runInTab(source: TrackSource, js: string, { wake = false } = {}): Promise<void> {
+/**
+ * Runs an action's script in the tab, in turn with other actions. With
+ * `async`, the script is an async function body (see evaluateAsyncInTab).
+ */
+async function runInTab(source: TrackSource, js: string, { wake = false, async = false } = {}): Promise<void> {
     // Whatever the user just acted on is the tab to follow.
     if (!followed || !isSameTab(followed, source)) {
         followed = source
@@ -678,7 +703,8 @@ async function runInTab(source: TrackSource, js: string, { wake = false } = {}):
     lastUsedBrowser = source.browser
     await enqueue(async () => {
         const blocked = wake && (await isPlaybackBlocked(source))
-        await executeInTab(source, js)
+        if (async) await evaluateAsyncInTab(source, js)
+        else await executeInTab(source, js)
         if (wake && !blocked) await wakeIfAsleep(source)
     })
 }
@@ -707,7 +733,7 @@ end tell`)
 
 export async function control(source: TrackSource, action: PlayerControl): Promise<void> {
     if (!(action in CONTROL_SELECTORS)) throw new Error('Invalid player control')
-    await runInTab(source, `document.querySelector('ytmusic-player-bar ${CONTROL_SELECTORS[action]}')?.click()`, {
+    await runInTab(source, `document.querySelector('${CONTROL_SELECTORS[action]}')?.click()`, {
         wake: true,
     })
 }
@@ -727,7 +753,7 @@ export async function setPlaying(source: TrackSource, playing: boolean): Promise
                 if (${playing}) video.play(); else video.pause();
                 return;
             }
-            document.querySelector('ytmusic-player-bar #play-pause-button')?.click();
+            document.querySelector('${PLAY_PAUSE_BUTTON}')?.click();
         })()`,
         { wake: playing },
     )
@@ -735,27 +761,33 @@ export async function setPlaying(source: TrackSource, playing: boolean): Promise
 
 export async function setLoop(source: TrackSource, enabled: boolean): Promise<void> {
     if (typeof enabled !== 'boolean') throw new Error('Invalid loop request')
-    // The repeat button only cycles (off → all → one → off), and the bar's
-    // repeat-mode attribute updates synchronously on each click, so click
-    // until it matches; three clicks cover the whole cycle. The mode from
-    // before looping lives on the page so each tab restores its own.
+    // The repeat button only cycles (off → all → one → off), so click until
+    // the mode matches; three clicks cover the whole cycle. The old player
+    // bar shows a click at once, the new player a render later, so each
+    // click waits for the mode to change. The mode from before looping lives
+    // on the page so each tab restores its own.
     await runInTab(
         source,
-        `(() => {
-            const bar = document.querySelector('ytmusic-player-bar');
-            const button = bar && bar.querySelector('.repeat');
-            if (!button) return;
-            const mode = bar.getAttribute('repeat-mode');
-            let target = 'ONE';
-            if (${enabled}) {
-                if (mode !== 'ONE') window.__musicBarModeBeforeLoop = mode;
-            } else {
-                if (mode !== 'ONE') return;
-                target = window.__musicBarModeBeforeLoop === 'ALL' ? 'ALL' : 'NONE';
-                delete window.__musicBarModeBeforeLoop;
+        `const button = document.querySelector('${REPEAT_BUTTON}');
+        if (!button) return;
+        const readMode = () => ${REPEAT_MODE_JS};
+        const mode = readMode();
+        let target = 'ONE';
+        if (${enabled}) {
+            if (mode !== 'ONE') window.__musicBarModeBeforeLoop = mode;
+        } else {
+            if (mode !== 'ONE') return;
+            target = window.__musicBarModeBeforeLoop === 'ALL' ? 'ALL' : 'NONE';
+            delete window.__musicBarModeBeforeLoop;
+        }
+        for (let i = 0; i < 3 && readMode() !== target; i++) {
+            const before = readMode();
+            button.click();
+            for (let wait = 0; wait < 20 && readMode() === before; wait++) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
             }
-            for (let i = 0; i < 3 && bar.getAttribute('repeat-mode') !== target; i++) button.click();
-        })()`,
+        }`,
+        { async: true },
     )
 }
 

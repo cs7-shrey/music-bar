@@ -37,6 +37,11 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   id (`BUNDLE_IDS`), never by name: macOS can resolve a name like "Brave
   Browser" to another app (Helium, on one Mac). No accessibility tree: Chromium only
   exposes the front tab's page to it.
+  YouTube Music is testing a redesigned player (seen signed out) whose
+  controls are in `ytmusic-wiz-player-controls`, not `ytmusic-player-bar`.
+  Every player selector lists both (`PLAY_PAUSE_BUTTON`, `REPEAT_BUTTON`,
+  `CONTROL_SELECTORS`, `REPEAT_MODE_JS`); test changes in both, e.g. a
+  signed-out private window gets the new one.
   Scripts run in the browser's isolated world: DOM and cookies are shared
   with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`
   cannot await; use `evaluateAsyncInTab` for anything async.
