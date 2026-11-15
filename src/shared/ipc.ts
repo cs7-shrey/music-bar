@@ -65,6 +65,8 @@ export const IPC = {
     updateGet: 'update:get',
     /** renderer → main: restart to install the downloaded update. */
     updateInstall: 'update:install',
+    /** renderer → main (invoke): like the song playing in a tab (⌘⇧L). */
+    nowPlayingLike: 'now-playing:like',
     /** main → renderer: an update finished downloading while the app runs. */
     updateReady: 'update:ready',
 } as const
@@ -177,6 +179,16 @@ export type SearchResults =
 
 export type PlayerControl = 'previous' | 'next'
 
+export interface LikeResult {
+    /** signedOut: the browser has no YouTube Music account to like with. */
+    status: 'liked' | 'alreadyLiked' | 'signedOut'
+    /**
+     * Set when the song was playing in a private window: it opened (paused)
+     * in a normal tab of this browser, and was liked there.
+     */
+    openedIn?: BrowserName
+}
+
 export interface MusicBarApi {
     hide(): void
     onShown(listener: () => void): () => void
@@ -212,5 +224,7 @@ export interface MusicBarApi {
     /** The version downloaded and waiting for a restart, or null. */
     getUpdate(): Promise<string | null>
     installUpdate(): void
+    /** Likes the song playing in a tab unless it already is; see LikeResult. */
+    like(source: TrackSource): Promise<LikeResult>
     onUpdateReady(listener: () => void): () => void
 }

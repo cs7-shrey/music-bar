@@ -1,5 +1,5 @@
 import type { SearchResults, SearchSong } from '../shared/ipc'
-import { defaultTab, evaluateAsyncInTab } from './youtube-music'
+import { defaultTab, evaluateAsyncInTab, INNERTUBE_JS } from './youtube-music'
 import { describe, logger } from './log'
 
 // Search goes through YouTube Music's own internal API (the endpoints its
@@ -12,43 +12,9 @@ const log = logger('search')
 const MAX_SUGGESTIONS = 3
 const MAX_SONGS = 5
 
-/**
- * Async function body that POSTs to an InnerTube endpoint and returns the
- * response text. Scripts run in an isolated world without the page's `ytcfg`,
- * so client config is read from the page's inline scripts, and the request is
- * signed with the SAPISIDHASH header the page itself sends when logged in.
- */
+/** Async function body that POSTs to an InnerTube endpoint and returns the response text. */
 function innerTubeRequest(endpoint: string, payload: Record<string, string>): string {
-    return `
-        const html = [...document.scripts].map((script) => script.textContent).join(' ');
-        const config = (key) => (html.match(new RegExp('"' + key + '":"([^"]+)"')) || [])[1];
-        const cookie = (name) => (document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]+)')) || [])[1];
-        const headers = { 'Content-Type': 'application/json' };
-        const sapisid = cookie('SAPISID') || cookie('__Secure-3PAPISID');
-        if (sapisid) {
-            const timestamp = Math.floor(Date.now() / 1000);
-            const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(timestamp + ' ' + sapisid + ' ' + location.origin));
-            const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-            headers['Authorization'] = 'SAPISIDHASH ' + timestamp + '_' + hash;
-            headers['X-Origin'] = location.origin;
-            headers['X-Goog-AuthUser'] = '0';
-        }
-        const context = { client: {
-            clientName: 'WEB_REMIX',
-            clientVersion: config('INNERTUBE_CLIENT_VERSION'),
-            hl: config('HL'),
-            gl: config('GL'),
-            visitorData: config('VISITOR_DATA'),
-        } };
-        const response = await fetch('/youtubei/v1/${endpoint}?prettyPrint=false', {
-            method: 'POST',
-            credentials: 'include',
-            headers,
-            body: JSON.stringify({ context, ...${JSON.stringify(payload)} }),
-        });
-        if (!response.ok) throw new Error('YouTube Music search failed (' + response.status + ')');
-        return await response.text();
-    `
+    return `${INNERTUBE_JS} return await innerTube(${JSON.stringify(endpoint)}, ${JSON.stringify(payload)});`
 }
 
 async function requestInTab(endpoint: string, payload: Record<string, string>): Promise<unknown> {

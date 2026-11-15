@@ -47,7 +47,7 @@ export default function App() {
     // Brief confirmation shown in the footer, e.g. after queueing a song.
     const [notice, setNotice] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
-    const nowPlaying = useNowPlaying()
+    const nowPlaying = useNowPlaying({ notify: setNotice })
     const track = nowPlaying.state?.status === 'track' ? nowPlaying.state.track : null
     const isLooping = track?.repeatMode === 'ONE'
     // Song-only commands (loop, radio) are unavailable while an ad plays.
@@ -171,6 +171,12 @@ export default function App() {
         if (event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'o') {
             event.preventDefault()
             if (!event.repeat) nowPlaying.goToTab()
+            return
+        }
+        // ⌘⇧L likes the playing song.
+        if (event.metaKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'l') {
+            event.preventDefault()
+            if (!event.repeat) nowPlaying.like()
             return
         }
         // Player shortcuts work from anywhere, even mid-search: ⌘O loop,

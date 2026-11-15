@@ -83,6 +83,22 @@ function openMusicBar(): void {
     else showLauncher()
 }
 
+/**
+ * Runs an action that may make a browser tab. The browser comes forward when
+ * a tab is made; `returnFocus` puts the app the user was in back in front and
+ * gives the launcher the keyboard again. The launcher stays up through all
+ * that, so what it showed still shows.
+ */
+async function throughNewTab<T>(run: (returnFocus: () => Promise<void>) => Promise<T>): Promise<T> {
+    const previousApp = await frontmostApp()
+    const returnFocus = async () => {
+        if (previousApp && previousApp.pid !== process.pid) await activateApp(previousApp)
+        focusLauncher()
+    }
+    holdThroughBlur(15_000)
+    return run(returnFocus).finally(() => holdThroughBlur(0))
+}
+
 function openSettings(section?: SettingsSection): void {
     // Settings takes focus next. app.hide() would switch to the previous app
     // a moment after settings appears, and take focus away from it.
@@ -199,19 +215,13 @@ app.whenReady().then(() => {
     )
     handleAction(IPC.nowPlayingLoadTab, (source: TrackSource) => youtubeMusic.loadTab(source))
     handleAction(IPC.nowPlayingSetLoop, (source: TrackSource, enabled: boolean) => youtubeMusic.setLoop(source, enabled))
-    handleAction(IPC.openYouTubeMusic, async (browser: BrowserName) => {
-        // The browser comes forward when the tab is made. The app the user
-        // was in goes back in front right after, and the launcher takes the
-        // keyboard again; it stays up through all that so the search results
-        // still show.
-        const previousApp = await frontmostApp()
-        const returnFocus = async () => {
-            if (previousApp && previousApp.pid !== process.pid) await activateApp(previousApp)
-            focusLauncher()
-        }
-        holdThroughBlur(15_000)
-        return youtubeMusic.openYouTubeMusic(browser, returnFocus).finally(() => holdThroughBlur(0))
-    })
+    handleAction(IPC.openYouTubeMusic, (browser: BrowserName) =>
+        throughNewTab((returnFocus) => youtubeMusic.openYouTubeMusic(browser, returnFocus)),
+    )
+    // A song in a private window is liked from a new normal tab.
+    handleAction(IPC.nowPlayingLike, (source: TrackSource) =>
+        throughNewTab((returnFocus) => youtubeMusic.likeNowPlaying(source, returnFocus)),
+    )
     ipcMain.on(IPC.setupShow, (_event, section?: SettingsSection) => openSettings(section))
     ipcMain.handle(IPC.loginItemGet, () => ({ enabled: isOpenAtLogin(), available: canOpenAtLogin() }))
     handleAction(IPC.loginItemSet, (enabled: boolean) => setOpenAtLogin(enabled))

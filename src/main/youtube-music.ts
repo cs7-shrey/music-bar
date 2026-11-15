@@ -3,7 +3,16 @@ import { randomUUID } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import type { BrowserName, BrowserSetupState, BrowserStatus, NowPlaying, PlayerControl, Track, TrackSource } from '../shared/ipc'
+import type {
+    BrowserName,
+    BrowserSetupState,
+    BrowserStatus,
+    LikeResult,
+    NowPlaying,
+    PlayerControl,
+    Track,
+    TrackSource,
+} from '../shared/ipc'
 import { getSettings } from './settings'
 import { describe, logger } from './log'
 
@@ -793,6 +802,47 @@ export async function setLoop(source: TrackSource, enabled: boolean): Promise<vo
 
 const VIDEO_ID = /^[\w-]{11}$/
 
+/**
+ * Defines `innerTube(endpoint, payload)` for an async script (see
+ * evaluateAsyncInTab). InnerTube is YouTube's internal API, the
+ * /youtubei/v1/ endpoints its own pages call; called from inside a YT Music
+ * tab, requests carry the user's session. Scripts run in an isolated world
+ * without the page's `ytcfg`, so client config is read from the page's
+ * inline scripts, and the request is signed with the SAPISIDHASH header the
+ * page itself sends when logged in. Resolves with the response text.
+ */
+export const INNERTUBE_JS = `
+    const innerTube = async (endpoint, payload) => {
+        const html = [...document.scripts].map((script) => script.textContent).join(' ');
+        const config = (key) => (html.match(new RegExp('"' + key + '":"([^"]+)"')) || [])[1];
+        const cookie = (name) => (document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]+)')) || [])[1];
+        const headers = { 'Content-Type': 'application/json' };
+        const sapisid = cookie('SAPISID') || cookie('__Secure-3PAPISID');
+        if (sapisid) {
+            const timestamp = Math.floor(Date.now() / 1000);
+            const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(timestamp + ' ' + sapisid + ' ' + location.origin));
+            const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+            headers['Authorization'] = 'SAPISIDHASH ' + timestamp + '_' + hash;
+            headers['X-Origin'] = location.origin;
+            headers['X-Goog-AuthUser'] = '0';
+        }
+        const context = { client: {
+            clientName: 'WEB_REMIX',
+            clientVersion: config('INNERTUBE_CLIENT_VERSION'),
+            hl: config('HL'),
+            gl: config('GL'),
+            visitorData: config('VISITOR_DATA'),
+        } };
+        const response = await fetch('/youtubei/v1/' + endpoint + '?prettyPrint=false', {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify({ context, ...payload }),
+        });
+        if (!response.ok) throw new Error('YouTube Music ' + endpoint + ' failed (' + response.status + ')');
+        return await response.text();
+    };`
+
 /** The followed tab, for actions on a song from search. */
 async function tabForSong(videoId: string): Promise<TrackSource> {
     if (!VIDEO_ID.test(videoId)) throw new Error('Invalid video id')
@@ -926,6 +976,24 @@ const OPEN_TAB_TIMEOUT_MS = 15_000
 const SHOW_TAB_TIMEOUT_MS = 3000
 const OPEN_TAB_POLL_MS = 100
 
+/** Runs a check in a tab, false while the tab can't answer (e.g. mid-navigation). */
+async function checkInTab(source: TrackSource, js: string): Promise<boolean> {
+    try {
+        return (await executeInTab(source, js, 1)) === 'true'
+    } catch {
+        return false
+    }
+}
+
+/** Resolves once a new tab has loaded YouTube Music. */
+async function waitForYouTubeMusic(source: TrackSource): Promise<void> {
+    const deadline = Date.now() + OPEN_TAB_TIMEOUT_MS
+    while (!(await checkInTab(source, `String(document.readyState === 'complete' && !!document.querySelector('ytmusic-app'))`))) {
+        if (Date.now() > deadline) throw new Error(`YouTube Music didn't finish loading in ${source.browser}`)
+        await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
+    }
+}
+
 /**
  * Opens YouTube Music in a new tab of the browser's front window without
  * bringing the browser forward, and resolves once it's running there.
@@ -962,19 +1030,9 @@ end tell`)
         const started = Date.now()
         log.info(`made a YT Music tab (${placement})`, source)
 
-        const check = async (js: string) => {
-            try {
-                return (await executeInTab(source, js, 1)) === 'true'
-            } catch {
-                return false // Still navigating.
-            }
-        }
-        const deadline = Date.now() + OPEN_TAB_TIMEOUT_MS
-        while (!(await check(`String(document.readyState === 'complete' && !!document.querySelector('ytmusic-app'))`))) {
-            if (Date.now() > deadline) throw new Error(`YouTube Music didn't finish loading in ${browser}`)
-            await new Promise((resolve) => setTimeout(resolve, OPEN_TAB_POLL_MS))
-        }
+        await waitForYouTubeMusic(source)
         log.info(`YT Music loaded in ${Date.now() - started}ms`)
+        const check = (js: string) => checkInTab(source, js)
 
         // While the tab is on screen, play a moment of silence so the page
         // counts as having played media; then songs load from the background.
@@ -1004,4 +1062,154 @@ end tell`)
         lastUsedBrowser = browser
         knownTabs = [source, ...knownTabs]
     })
+}
+
+/**
+ * Expression for the video id of the tab's current song, or ''. YouTube's
+ * player knows it, in the page world; the page URL doesn't always carry it
+ * (e.g. on a library page with the mini player), but is the fallback.
+ */
+const CURRENT_VIDEO_ID_JS = `(() => {
+    ${inPageWorld(`document.documentElement.dataset.musicBarVideoId = document.querySelector('#movie_player')?.getVideoData?.().video_id || ''`)};
+    const id = document.documentElement.dataset.musicBarVideoId || new URLSearchParams(location.search).get('v') || '';
+    delete document.documentElement.dataset.musicBarVideoId;
+    return id;
+})()`
+
+/**
+ * Async script that likes a song unless it already is, from a tab signed in
+ * to YouTube Music. Returns 'liked', 'alreadyLiked' or 'signedOut'.
+ *
+ * When the song is the tab's current one, it goes through the player bar's
+ * like button, so the page shows it liked too. A tab still loading the song
+ * gets a few seconds for that button (waits are timed, not counted: a hidden
+ * tab runs timers about once a second). Otherwise (the redesigned player, whose
+ * signed-in like button nobody has seen yet) it goes through InnerTube:
+ * the like status from `next`, as the watch page gets it, then `like/like`.
+ */
+function likeJs(videoId: string): string {
+    return `
+        const videoId = '${videoId}';
+        const giveUpAt = Date.now() + 3000;
+        while (document.querySelector('ytmusic-player-bar')) {
+            const button = document.querySelector('ytmusic-player-bar ytmusic-like-button-renderer');
+            const ready = button?.hasAttribute('like-status');
+            const current = ${CURRENT_VIDEO_ID_JS};
+            if (ready && current === videoId) {
+                if (button.getAttribute('like-status') === 'LIKE') return 'alreadyLiked';
+                button.querySelector('#button-shape-like button').click();
+                return 'liked';
+            }
+            if ((ready && current && current !== videoId) || Date.now() > giveUpAt) break;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!/(?:^|; )(?:SAPISID|__Secure-3PAPISID)=/.test(document.cookie)) return 'signedOut';
+        ${INNERTUBE_JS}
+        const next = JSON.parse(await innerTube('next', { videoId }));
+        const actions = next.playerOverlays?.playerOverlayRenderer?.actions ?? [];
+        const status = actions.find((action) => action.likeButtonRenderer)?.likeButtonRenderer.likeStatus;
+        if (status === 'LIKE') return 'alreadyLiked';
+        await innerTube('like/like', { target: { videoId } });
+        return 'liked';
+    `
+}
+
+/** Whether the tab is in a private (incognito) window. */
+async function isPrivate(source: TrackSource): Promise<boolean> {
+    const mode = await runAppleScript(`tell ${appRef(source.browser)} to get mode of window id ${source.windowId}`).catch(
+        () => 'normal',
+    )
+    return mode === 'incognito'
+}
+
+/**
+ * The song in a tab of the browser's normal (not private) windows: a tab
+ * already on it, else a new background tab in the front normal window, else
+ * a new window. Making a window or tab brings the browser forward;
+ * afterTabMade hands focus back.
+ */
+async function songInNormalTab(
+    browser: BrowserName,
+    videoId: string,
+    afterTabMade?: () => Promise<void>,
+): Promise<{ source: TrackSource; opened: boolean }> {
+    const url = `https://music.youtube.com/watch?v=${videoId}`
+    // Windows are held by id: `repeat with w in windows` gives "item n of
+    // windows", which points at another window once making a tab reorders them.
+    const found = await runAppleScript(`
+tell ${appRef(browser)}
+    set normalIds to {}
+    repeat with candidate in windows
+        if mode of candidate is "normal" then set end of normalIds to id of candidate
+    end repeat
+    repeat with windowId in normalIds
+        set w to window id windowId
+        repeat with t in tabs of w
+            if URL of t contains "v=${videoId}" then return (windowId as text) & " " & (id of t as text) & " found"
+        end repeat
+    end repeat
+    if (count of normalIds) > 0 then
+        set w to window id (item 1 of normalIds)
+        set previousIndex to active tab index of w
+        set t to make new tab at end of tabs of w with properties {URL:${asString(url)}}
+        set active tab index of w to previousIndex
+        return (id of w as text) & " " & (id of t as text) & " opened"
+    end if
+    set w to make new window
+    set URL of active tab of w to ${asString(url)}
+    return (id of w as text) & " " & (id of active tab of w as text) & " opened"
+end tell`)
+    const [windowId, tabId, how] = found.split(' ')
+    const opened = how === 'opened'
+    if (opened) await afterTabMade?.()
+    return { source: { browser, windowId: Number(windowId), tabId: Number(tabId) }, opened }
+}
+
+/**
+ * Likes the song playing in a tab. A private window has no account to like
+ * with, so the song opens in a normal tab of the same browser, paused, and
+ * is liked there.
+ */
+export async function likeNowPlaying(
+    source: TrackSource,
+    afterTabMade?: () => Promise<void>,
+): Promise<LikeResult> {
+    let result: LikeResult | undefined
+    await enqueue(async () => {
+        const videoId = await executeInTab(source, CURRENT_VIDEO_ID_JS)
+        if (!VIDEO_ID.test(videoId)) throw new Error('No song to like')
+        if (!(await isPrivate(source))) {
+            result = { status: await likeIn(source, videoId) }
+            return
+        }
+        const { source: tab, opened } = await songInNormalTab(source.browser, videoId, afterTabMade)
+        log.info(opened ? 'opened the private song in a normal tab' : 'found the private song in a normal tab', tab)
+        if (opened) {
+            await waitForYouTubeMusic(tab)
+            // A new tab starts the song (silently: a hidden page that hasn't
+            // played yet doesn't load media), and would play it out loud once
+            // shown. Paused here, it stays paused when shown.
+            await evaluateAsyncInTab(
+                tab,
+                `const giveUpAt = Date.now() + 8000;
+                while (Date.now() < giveUpAt) {
+                    const video = document.querySelector('video');
+                    if (video && !video.paused) return video.pause();
+                    await new Promise((resolve) => setTimeout(resolve, 100));
+                }`,
+                10_000,
+            )
+        }
+        result = { status: await likeIn(tab, videoId), openedIn: source.browser }
+    })
+    if (!result) throw new Error('No song to like')
+    return result
+}
+
+async function likeIn(tab: TrackSource, videoId: string): Promise<LikeResult['status']> {
+    const status = await evaluateAsyncInTab(tab, likeJs(videoId))
+    if (status !== 'liked' && status !== 'alreadyLiked' && status !== 'signedOut') {
+        throw new Error(`Unexpected like result: ${status}`)
+    }
+    return status
 }

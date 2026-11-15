@@ -42,6 +42,7 @@ const api: MusicBarApi = {
     finishSetup: () => ipcRenderer.send(IPC.setupFinish),
     getUpdate: () => ipcRenderer.invoke(IPC.updateGet),
     installUpdate: () => ipcRenderer.send(IPC.updateInstall),
+    like: (source) => ipcRenderer.invoke(IPC.nowPlayingLike, source),
     onUpdateReady: (listener) => subscribe(IPC.updateReady, listener),
 }
 

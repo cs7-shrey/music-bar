@@ -42,6 +42,12 @@ Electron Forge + Vite, React 19, Tailwind CSS v4, `cmdk` for the command list,
   Every player selector lists both (`PLAY_PAUSE_BUTTON`, `REPEAT_BUTTON`,
   `CONTROL_SELECTORS`, `REPEAT_MODE_JS`); test changes in both, e.g. a
   signed-out private window gets the new one.
+  ⌘⇧L likes the playing song (`likeNowPlaying`): through the player bar's
+  like button when the page has one, so the page shows it, else through
+  InnerTube (`INNERTUBE_JS`, YouTube's internal API the search uses too).
+  A private window has no account to like with, so the song opens paused
+  in a background tab of a normal window of the same browser (or a tab
+  already on it) and is liked there.
   Scripts run in the browser's isolated world: DOM and cookies are shared
   with the page, page globals (`ytcfg`, etc.) are not. `execute javascript`
   cannot await; use `evaluateAsyncInTab` for anything async.
@@ -191,7 +197,7 @@ round trip through AppleScript into the browser tab.
 | Heavy action (rebuilds the queue or replaces the song) | Debounce: only the **last** press in a burst runs, 300ms after presses stop. Related actions share a key so the last one wins. | `debounceAction(key, run)` | Start Radio (row and ⌘R), ⌘↵ radio from search (key `'radio'`) |
 | Countable step (each press means one step) | No debounce: every press runs. | `act` | previous / next (⌘H / ⌘L) |
 | Additive, repeatable on purpose | No debounce. | — | ⇧↵ play next (queueing several songs is the point) |
-| One-off with a busy state | Ignore presses while it runs. | flag, e.g. `loadingTab`, `openingIn`, `openingTab` | Load an inactive tab, open YouTube Music in a browser, go to the playing tab (cover, ⌘⇧O) |
+| One-off with a busy state | Ignore presses while it runs. | flag, e.g. `loadingTab`, `openingIn`, `openingTab`, `liking` | Load an inactive tab, open YouTube Music in a browser, go to the playing tab (cover, ⌘⇧O), like (⌘⇧L) |
 
 Also:
 - Main runs actions one at a time in order (`enqueue` in `youtube-music.ts`),
@@ -201,7 +207,7 @@ Also:
 - Search requests are debounced too (200ms, `useSuggestions` in `search.tsx`).
 - Until the first read after each open lands (`syncing`), the card shows
   state from the last open. Actions that depend on it (play/pause, loop,
-  radio, going to the tab) are queued instead (`queue`): the button stays pressed, a second
+  radio, going to the tab, like) are queued instead (`queue`): the button stays pressed, a second
   press does nothing, and the action runs on the fresh state. So ↵ on
   "Pause" right after a media key started playback pauses. Play/pause also
   waits while a song loads (`isLoading`, shown as "Fetching…"): the page

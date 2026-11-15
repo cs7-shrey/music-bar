@@ -3,6 +3,7 @@ import { Music2, Pause, Play } from 'lucide-react'
 import type {
     BrowserName,
     BrowserStatus,
+    LikeResult,
     NowPlaying as NowPlayingState,
     PlayerControl,
     RepeatMode,
@@ -40,7 +41,7 @@ const SHORTCUT_HINT_DELAY_MS = 400
 
 type Toggle = 'play' | 'loop'
 /** An action pressed before the launcher's first read came back. */
-export type QueuedAction = 'play' | 'loop' | 'radio' | 'tab'
+export type QueuedAction = 'play' | 'loop' | 'radio' | 'tab' | 'like'
 /**
  * Where an action was pressed, so a queued one shows on that button: the
  * card's controls, or the command list (a row, ↵ or a shortcut).
@@ -52,7 +53,16 @@ const sameSong = (a: Track, b: Track) => a.title === b.title && a.artist === b.a
 export const BROWSER_NAMES: Record<BrowserName, string> = { 'Brave Browser': 'Brave', 'Google Chrome': 'Chrome', Helium: 'Helium' }
 
 /** Polls the current YouTube Music track while the launcher is visible. */
-export function useNowPlaying() {
+/** What the footer says once ⌘⇧L is done. */
+function likeMessage(title: string, { status, openedIn }: LikeResult): string {
+    const browser = openedIn && BROWSER_NAMES[openedIn]
+    if (status === 'signedOut') return `Sign in to YouTube Music${browser ? ` in ${browser}` : ''} to like songs`
+    if (status === 'alreadyLiked') return browser ? `“${title}” is already liked, in a ${browser} tab` : `“${title}” is already liked`
+    return browser ? `Liked “${title}” in a ${browser} tab` : `Liked “${title}”`
+}
+
+/** `notify` puts a short message in the launcher's footer. */
+export function useNowPlaying({ notify }: { notify: (message: string) => void }) {
     const [state, setState] = useState<NowPlayingState | null>(null)
     // Dims the card when, shortly after opening, it still shows the state from
     // when the launcher last closed, which may be out of date.
@@ -394,6 +404,31 @@ export function useNowPlaying() {
         }
     }
     const [coverPressed, setCoverPressed] = useState(false)
+
+    /**
+     * Likes the playing song (⌘⇧L); a song in a private window is liked in
+     * a new normal tab. Pressed while syncing, it waits for the fresh read.
+     * Presses while one runs are ignored.
+     */
+    const like = () => {
+        if (syncingRef.current) queue('like', 'list')
+        else void likePlaying()
+    }
+    const liking = useRef(false)
+    const likePlaying = async () => {
+        const current = latestTrack.current
+        if (!current || current.isAd || liking.current) return
+        liking.current = true
+        notify(`Liking “${current.title}”…`)
+        try {
+            notify(likeMessage(current.title, await window.musicBar.like(current.source)))
+        } catch (error) {
+            console.error('[music-bar] like failed', error)
+            notify(`Couldn't like “${current.title}”`)
+        } finally {
+            liking.current = false
+        }
+    }
     const coverPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
     const loadTab = async () => {
@@ -445,6 +480,7 @@ export function useNowPlaying() {
         if (loop) toggleLoop(loop)
         if (actions.has('radio')) startRadio()
         if (actions.has('tab')) void openPlayingTab()
+        if (actions.has('like')) void likePlaying()
         // Runs once per completed sync; the actions are this render's.
     }, [syncing, loading])
 
@@ -468,6 +504,7 @@ export function useNowPlaying() {
         loadTab,
         showTab,
         goToTab,
+        like,
         coverPressed,
         loadingTab,
     }
